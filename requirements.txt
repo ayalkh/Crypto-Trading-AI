@@ -1,0 +1,17 @@
+# Basic libraries
+pandas==2.3.1
+numpy==2.3.1
+matplotlib==3.10.3
+
+# Crypto data
+ccxt==4.4.94
+requests==2.32.4
+
+# Database
+# sqlite3 is built-in to Python, no need to install
+
+# Jupyter
+jupyter==1.1.1
+
+# Utilities  
+python-dotenv==1.1.1
