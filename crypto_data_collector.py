@@ -25,7 +25,7 @@ def main():
         return
     
     # Our target cryptocurrencies
-    symbols = ['BTC/USDT.P', 'ETH/USDT.P', 'BNB/USDT.P']
+    symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
     
     # Create data folder if it doesn't exist
     os.makedirs('data', exist_ok=True)
