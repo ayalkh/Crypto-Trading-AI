@@ -1,18 +1,193 @@
 """
-Ultimate Crypto Trading Signals - Combined System
-Merges Trade Bulls Strategy + Technical Indicators for Maximum Accuracy
+Ultimate Crypto Trading Signals - Fixed Database Version
+Uses data/multi_timeframe_data.db with proper error handling
 """
 
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timedelta
 import warnings
+import os
 warnings.filterwarnings('ignore')
 
-# Import our existing strategies
-import sys
-import os
+# Disable matplotlib to prevent charts
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+
+class DatabaseManager:
+    def __init__(self, db_path='data/multi_timeframe_data.db'):
+        """Initialize database connection"""
+        self.db_path = db_path
+        
+        # Check if database exists
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"Database not found: {db_path}")
+        
+        print(f"📊 Connected to database: {db_path}")
+    
+    def get_connection(self):
+        """Get database connection"""
+        return sqlite3.connect(self.db_path)
+    
+    def get_available_symbols(self):
+        """Get list of available symbols from database"""
+        try:
+            with self.get_connection() as conn:
+                query = "SELECT DISTINCT symbol FROM price_data ORDER BY symbol"
+                symbols = pd.read_sql_query(query, conn)['symbol'].tolist()
+                print(f"✅ Found {len(symbols)} symbols: {symbols}")
+                return symbols
+        except Exception as e:
+            print(f"❌ Error getting symbols: {e}")
+            return []
+    
+    def get_available_timeframes(self, symbol=None):
+        """Get available timeframes"""
+        try:
+            with self.get_connection() as conn:
+                if symbol:
+                    query = "SELECT DISTINCT timeframe FROM price_data WHERE symbol = ? ORDER BY timeframe"
+                    params = (symbol,)
+                else:
+                    query = "SELECT DISTINCT timeframe FROM price_data ORDER BY timeframe"
+                    params = ()
+                
+                timeframes = pd.read_sql_query(query, conn, params=params)['timeframe'].tolist()
+                return timeframes
+        except Exception as e:
+            print(f"❌ Error getting timeframes: {e}")
+            return []
+    
+    def get_latest_data_info(self):
+        """Get info about the latest data in database"""
+        try:
+            with self.get_connection() as conn:
+                query = """
+                SELECT 
+                    symbol,
+                    timeframe,
+                    COUNT(*) as record_count,
+                    MAX(timestamp) as latest_timestamp
+                FROM price_data
+                GROUP BY symbol, timeframe
+                ORDER BY symbol, timeframe
+                """
+                
+                info_df = pd.read_sql_query(query, conn)
+                return info_df
+        except Exception as e:
+            print(f"❌ Error getting data info: {e}")
+            return pd.DataFrame()
+    
+    def load_crypto_data(self, symbol, timeframe='1h', limit_hours=168):
+        """
+        Load crypto data from database
+        
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USDT')
+            timeframe: Data timeframe (e.g., '1h', '4h', '1d')
+            limit_hours: Number of hours of data to retrieve (168 = 7 days)
+        """
+        try:
+            with self.get_connection() as conn:
+                # First check what data is available
+                check_query = """
+                SELECT COUNT(*) as count, MAX(timestamp) as latest, MIN(timestamp) as earliest
+                FROM price_data 
+                WHERE symbol = ? AND timeframe = ?
+                """
+                
+                check_result = pd.read_sql_query(check_query, conn, params=(symbol, timeframe))
+                
+                if check_result['count'].iloc[0] == 0:
+                    print(f"⚠️ No data found for {symbol} {timeframe}")
+                    return None
+                
+                latest_time = pd.to_datetime(check_result['latest'].iloc[0])
+                earliest_time = pd.to_datetime(check_result['earliest'].iloc[0])
+                total_records = check_result['count'].iloc[0]
+                
+                print(f"📊 {symbol} {timeframe}: {total_records} records from {earliest_time} to {latest_time}")
+                
+                # Calculate the timestamp limit (get most recent data)
+                hours_ago = latest_time - timedelta(hours=limit_hours)
+                
+                query = """
+                SELECT timestamp, open, high, low, close, volume
+                FROM price_data 
+                WHERE symbol = ? AND timeframe = ? AND timestamp >= ?
+                ORDER BY timestamp ASC
+                """
+                
+                df = pd.read_sql_query(
+                    query, 
+                    conn, 
+                    params=(symbol, timeframe, hours_ago.strftime('%Y-%m-%d %H:%M:%S'))
+                )
+                
+                if df.empty:
+                    print(f"⚠️ No recent data found for {symbol} {timeframe}")
+                    return None
+                
+                # Convert timestamp to datetime
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                
+                # Ensure proper data types
+                numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+                for col in numeric_columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Remove any rows with NaN values
+                df = df.dropna()
+                
+                print(f"✅ Loaded {len(df)} records for {symbol} ({timeframe}) - Latest: {df['timestamp'].max()}")
+                return df
+                
+        except Exception as e:
+            print(f"❌ Error loading data for {symbol}: {e}")
+            return None
+    
+    def display_data_status(self):
+        """Display current data status"""
+        print(f"\n📊 DATABASE DATA STATUS")
+        print("=" * 70)
+        
+        info_df = self.get_latest_data_info()
+        
+        if info_df.empty:
+            print("⚠️ No data available in database")
+            return
+        
+        print(f"{'Symbol':<12} {'Timeframe':<10} {'Records':<8} {'Latest Data':<20} {'Status'}")
+        print("-" * 70)
+        
+        for _, row in info_df.iterrows():
+            latest = pd.to_datetime(row['latest_timestamp'])
+            latest_str = latest.strftime('%Y-%m-%d %H:%M')
+            
+            # Check data freshness
+            hours_old = (datetime.now() - latest).total_seconds() / 3600
+            
+            if hours_old < 2:
+                status = "🟢 Fresh"
+            elif hours_old < 24:
+                status = f"🟡 {hours_old:.0f}h old"
+            else:
+                status = f"🔴 {hours_old/24:.0f}d old"
+            
+            print(f"{row['symbol']:<12} {row['timeframe']:<10} {row['record_count']:<8} "
+                  f"{latest_str:<20} {status}")
+        
+        # Summary
+        total_records = info_df['record_count'].sum()
+        unique_symbols = info_df['symbol'].nunique()
+        unique_timeframes = info_df['timeframe'].nunique()
+        
+        print(f"\n📈 Summary:")
+        print(f"   Total Records: {total_records:,}")
+        print(f"   Symbols: {unique_symbols}")
+        print(f"   Timeframes: {unique_timeframes}")
 
 class UltimateSignalCombiner:
     def __init__(self):
@@ -36,144 +211,178 @@ class UltimateSignalCombiner:
     
     def calculate_trade_bulls_score(self, df):
         """Calculate Trade Bulls strategy score"""
-        # Simplified Trade Bulls logic for scoring
-        scores = pd.Series(0, index=df.index)
+        scores = pd.Series(50, index=df.index)
         
         if 'signal' in df.columns:
-            # Convert Trade Bulls signals to scores
             scores[df['signal'] == 'STRONG_BUY'] = 100
             scores[df['signal'] == 'BUY'] = 75
             scores[df['signal'] == 'SELL'] = 25
             scores[df['signal'] == 'STRONG_SELL'] = 0
             scores[df['signal'] == 'HOLD'] = 50
         else:
-            # Basic momentum scoring if Trade Bulls not available
             df['price_change_5'] = df['close'].pct_change(5) * 100
-            scores[df['price_change_5'] > 2] = 75  # Strong positive momentum
+            scores[df['price_change_5'] > 2] = 75
             scores[(df['price_change_5'] > 0) & (df['price_change_5'] <= 2)] = 60
             scores[(df['price_change_5'] < 0) & (df['price_change_5'] >= -2)] = 40
-            scores[df['price_change_5'] < -2] = 25  # Strong negative momentum
+            scores[df['price_change_5'] < -2] = 25
         
         return scores
     
     def calculate_rsi_score(self, df):
         """Calculate RSI-based score (0-100)"""
-        scores = pd.Series(50, index=df.index)  # Default neutral
+        scores = pd.Series(50, index=df.index)
+        
+        # Calculate RSI if not present
+        if 'rsi' not in df.columns:
+            df['rsi'] = self.calculate_rsi(df['close'])
         
         if 'rsi' in df.columns:
             rsi = df['rsi']
-            
-            # Extreme levels
-            scores[rsi <= 20] = 100  # Extreme oversold - strong buy
-            scores[(rsi > 20) & (rsi <= 30)] = 80   # Oversold - buy
-            scores[(rsi > 30) & (rsi <= 40)] = 65   # Slightly oversold
-            scores[(rsi > 40) & (rsi <= 60)] = 50   # Neutral
-            scores[(rsi > 60) & (rsi <= 70)] = 35   # Slightly overbought
-            scores[(rsi > 70) & (rsi <= 80)] = 20   # Overbought - sell
-            scores[rsi > 80] = 0    # Extreme overbought - strong sell
+            scores[rsi <= 20] = 100
+            scores[(rsi > 20) & (rsi <= 30)] = 80
+            scores[(rsi > 30) & (rsi <= 40)] = 65
+            scores[(rsi > 40) & (rsi <= 60)] = 50
+            scores[(rsi > 60) & (rsi <= 70)] = 35
+            scores[(rsi > 70) & (rsi <= 80)] = 20
+            scores[rsi > 80] = 0
         
         return scores
     
+    def calculate_rsi(self, prices, period=14):
+        """Calculate RSI indicator"""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
     def calculate_macd_score(self, df):
         """Calculate MACD-based score (0-100)"""
-        scores = pd.Series(50, index=df.index)  # Default neutral
+        scores = pd.Series(50, index=df.index)
+        
+        # Calculate MACD if not present
+        if not all(col in df.columns for col in ['macd_line', 'macd_signal_line', 'macd_histogram']):
+            macd_data = self.calculate_macd(df['close'])
+            df['macd_line'] = macd_data['macd_line']
+            df['macd_signal_line'] = macd_data['macd_signal']
+            df['macd_histogram'] = macd_data['macd_histogram']
         
         if all(col in df.columns for col in ['macd_line', 'macd_signal_line', 'macd_histogram']):
             macd_line = df['macd_line']
             signal_line = df['macd_signal_line']
             histogram = df['macd_histogram']
             
-            # MACD above signal line
             macd_bullish = macd_line > signal_line
-            
-            # Histogram increasing
             histogram_increasing = histogram > histogram.shift(1)
-            
-            # MACD crossovers
             macd_cross_up = (macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))
             macd_cross_down = (macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))
-            
-            # Zero line analysis
             macd_above_zero = macd_line > 0
             
-            # Scoring
-            scores[macd_cross_up & macd_above_zero] = 90  # Strong bullish signal
-            scores[macd_cross_up & ~macd_above_zero] = 75  # Bullish signal
+            scores[macd_cross_up & macd_above_zero] = 90
+            scores[macd_cross_up & ~macd_above_zero] = 75
             scores[macd_bullish & histogram_increasing & macd_above_zero] = 70
             scores[macd_bullish & macd_above_zero] = 60
             scores[macd_bullish & ~macd_above_zero] = 55
             
-            scores[macd_cross_down & ~macd_above_zero] = 10  # Strong bearish signal
-            scores[macd_cross_down & macd_above_zero] = 25   # Bearish signal
+            scores[macd_cross_down & ~macd_above_zero] = 10
+            scores[macd_cross_down & macd_above_zero] = 25
             scores[~macd_bullish & ~histogram_increasing & ~macd_above_zero] = 30
             scores[~macd_bullish & ~macd_above_zero] = 40
             scores[~macd_bullish & macd_above_zero] = 45
         
         return scores
     
+    def calculate_macd(self, prices, fast=12, slow=26, signal=9):
+        """Calculate MACD indicator"""
+        ema_fast = prices.ewm(span=fast).mean()
+        ema_slow = prices.ewm(span=slow).mean()
+        macd_line = ema_fast - ema_slow
+        macd_signal = macd_line.ewm(span=signal).mean()
+        macd_histogram = macd_line - macd_signal
+        
+        return {
+            'macd_line': macd_line,
+            'macd_signal': macd_signal,
+            'macd_histogram': macd_histogram
+        }
+    
     def calculate_bollinger_score(self, df):
         """Calculate Bollinger Bands score (0-100)"""
-        scores = pd.Series(50, index=df.index)  # Default neutral
+        scores = pd.Series(50, index=df.index)
+        
+        # Calculate Bollinger Bands if not present
+        if not all(col in df.columns for col in ['bb_upper', 'bb_lower', 'bb_position', 'bb_width']):
+            bb_data = self.calculate_bollinger_bands(df['close'])
+            df['bb_upper'] = bb_data['upper']
+            df['bb_lower'] = bb_data['lower']
+            df['bb_middle'] = bb_data['middle']
+            df['bb_position'] = ((df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])) * 100
+            df['bb_width'] = ((df['bb_upper'] - df['bb_lower']) / df['bb_middle']) * 100
         
         if all(col in df.columns for col in ['bb_upper', 'bb_lower', 'bb_position', 'bb_width']):
             bb_position = df['bb_position']
             bb_width = df['bb_width']
-            close = df['close']
             
-            # Band squeeze detection (low volatility)
             squeeze = bb_width < bb_width.rolling(20).mean() * 0.8
             
-            # Position-based scoring
-            scores[bb_position <= 5] = 90   # Very close to lower band - strong buy
-            scores[(bb_position > 5) & (bb_position <= 20)] = 75   # Near lower band - buy
-            scores[(bb_position > 20) & (bb_position <= 40)] = 60  # Lower half
-            scores[(bb_position > 40) & (bb_position <= 60)] = 50  # Middle
-            scores[(bb_position > 60) & (bb_position <= 80)] = 40  # Upper half
-            scores[(bb_position > 80) & (bb_position <= 95)] = 25  # Near upper band - sell
-            scores[bb_position > 95] = 10   # Very close to upper band - strong sell
+            scores[bb_position <= 5] = 90
+            scores[(bb_position > 5) & (bb_position <= 20)] = 75
+            scores[(bb_position > 20) & (bb_position <= 40)] = 60
+            scores[(bb_position > 40) & (bb_position <= 60)] = 50
+            scores[(bb_position > 60) & (bb_position <= 80)] = 40
+            scores[(bb_position > 80) & (bb_position <= 95)] = 25
+            scores[bb_position > 95] = 10
             
-            # Squeeze breakout bonus
             squeeze_breakout_up = squeeze.shift(1) & (bb_position > 80)
             squeeze_breakout_down = squeeze.shift(1) & (bb_position < 20)
             
-            scores[squeeze_breakout_up] = 95   # Breakout above squeeze
-            scores[squeeze_breakout_down] = 5  # Breakdown below squeeze
+            scores[squeeze_breakout_up] = 95
+            scores[squeeze_breakout_down] = 5
         
         return scores
     
+    def calculate_bollinger_bands(self, prices, period=20, std_dev=2):
+        """Calculate Bollinger Bands"""
+        middle = prices.rolling(window=period).mean()
+        std = prices.rolling(window=period).std()
+        upper = middle + (std * std_dev)
+        lower = middle - (std * std_dev)
+        
+        return {
+            'upper': upper,
+            'middle': middle,
+            'lower': lower
+        }
+    
     def calculate_volume_score(self, df):
         """Calculate volume confirmation score (0-100)"""
-        scores = pd.Series(50, index=df.index)  # Default neutral
+        scores = pd.Series(50, index=df.index)
         
         if 'volume' in df.columns:
             volume = df['volume']
             price_change = df['close'].pct_change()
             
-            # Volume moving averages
-            volume_ma_short = volume.rolling(10).mean()
             volume_ma_long = volume.rolling(30).mean()
             volume_ratio = volume / volume_ma_long
             
-            # Price and volume relationship
             price_up = price_change > 0
             price_down = price_change < 0
             high_volume = volume_ratio > 1.5
             very_high_volume = volume_ratio > 2.0
             low_volume = volume_ratio < 0.7
             
-            # Scoring logic
-            scores[price_up & very_high_volume] = 90    # Price up + very high volume
-            scores[price_up & high_volume] = 75         # Price up + high volume
-            scores[price_up & ~low_volume] = 60         # Price up + normal volume
-            scores[price_up & low_volume] = 45          # Price up + low volume (weak)
+            scores[price_up & very_high_volume] = 90
+            scores[price_up & high_volume] = 75
+            scores[price_up & ~low_volume] = 60
+            scores[price_up & low_volume] = 45
             
-            scores[price_down & very_high_volume] = 10  # Price down + very high volume
-            scores[price_down & high_volume] = 25       # Price down + high volume
-            scores[price_down & ~low_volume] = 40       # Price down + normal volume
-            scores[price_down & low_volume] = 55        # Price down + low volume (less bearish)
+            scores[price_down & very_high_volume] = 10
+            scores[price_down & high_volume] = 25
+            scores[price_down & ~low_volume] = 40
+            scores[price_down & low_volume] = 55
             
-            # No significant price change
-            scores[(abs(price_change) < 0.005)] = 50   # Neutral
+            scores[(abs(price_change) < 0.005)] = 50
         
         return scores
     
@@ -206,7 +415,7 @@ class UltimateSignalCombiner:
         
         df['combined_score'] = combined_score
         
-        # Generate ultimate signals based on combined score
+        # Generate ultimate signals
         ultimate_signals = pd.Series('HOLD', index=df.index)
         ultimate_signals[combined_score >= self.strong_threshold] = 'STRONG_BUY'
         ultimate_signals[(combined_score >= self.confidence_threshold_buy) & 
@@ -217,7 +426,7 @@ class UltimateSignalCombiner:
         
         df['ultimate_signal'] = ultimate_signals
         
-        # Calculate confidence percentage
+        # Calculate confidence
         df['confidence'] = np.where(
             combined_score >= 50,
             combined_score,
@@ -238,7 +447,6 @@ class UltimateSignalCombiner:
             price = df['close'].iloc[i]
             timestamp = df['timestamp'].iloc[i]
             
-            # New signal alerts
             if current_signal != prev_signal and current_signal != 'HOLD':
                 alert = {
                     'timestamp': timestamp,
@@ -249,14 +457,12 @@ class UltimateSignalCombiner:
                     'prev_signal': prev_signal
                 }
                 
-                # Add technical levels
                 if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
                     alert['resistance'] = df['bb_upper'].iloc[i]
                     alert['support'] = df['bb_lower'].iloc[i]
                 
                 alerts.append(alert)
             
-            # High confidence alerts
             elif confidence >= 85 and current_signal in ['STRONG_BUY', 'STRONG_SELL']:
                 alerts.append({
                     'timestamp': timestamp,
@@ -269,163 +475,6 @@ class UltimateSignalCombiner:
         
         return alerts
     
-    def create_ultimate_dashboard(self, df, symbol='BTC_USDT'):
-        """Create comprehensive ultimate signals dashboard"""
-        fig = plt.figure(figsize=(18, 20))
-        clean_symbol = symbol.replace('_USDT', '/USDT')
-        fig.suptitle(f'🚀 ULTIMATE CRYPTO SIGNALS - {clean_symbol}', 
-                    fontsize=20, fontweight='bold', y=0.98)
-        
-        # Create 5 subplots
-        gs = fig.add_gridspec(5, 1, height_ratios=[2.5, 1, 1, 1, 1.5], hspace=0.4)
-        
-        # 1. Price with Ultimate Signals
-        ax1 = fig.add_subplot(gs[0])
-        ax1.plot(df['timestamp'], df['close'], label='Price', color='black', linewidth=2)
-        
-        # Add Bollinger Bands if available
-        if 'bb_upper' in df.columns:
-            ax1.plot(df['timestamp'], df['bb_upper'], label='BB Upper', color='red', alpha=0.7)
-            ax1.plot(df['timestamp'], df['bb_lower'], label='BB Lower', color='green', alpha=0.7)
-            ax1.fill_between(df['timestamp'], df['bb_upper'], df['bb_lower'], alpha=0.1, color='blue')
-        
-        # Ultimate signals
-        strong_buy = df[df['ultimate_signal'] == 'STRONG_BUY']
-        buy = df[df['ultimate_signal'] == 'BUY']
-        sell = df[df['ultimate_signal'] == 'SELL']
-        strong_sell = df[df['ultimate_signal'] == 'STRONG_SELL']
-        
-        if not strong_buy.empty:
-            ax1.scatter(strong_buy['timestamp'], strong_buy['close'], 
-                       color='darkgreen', marker='^', s=200, label='STRONG BUY', 
-                       zorder=6, edgecolors='white', linewidth=2)
-        
-        if not buy.empty:
-            ax1.scatter(buy['timestamp'], buy['close'], 
-                       color='green', marker='^', s=120, label='BUY', 
-                       zorder=5, edgecolors='darkgreen', linewidth=1)
-        
-        if not sell.empty:
-            ax1.scatter(sell['timestamp'], sell['close'], 
-                       color='red', marker='v', s=120, label='SELL', 
-                       zorder=5, edgecolors='darkred', linewidth=1)
-        
-        if not strong_sell.empty:
-            ax1.scatter(strong_sell['timestamp'], strong_sell['close'], 
-                       color='darkred', marker='v', s=200, label='STRONG SELL', 
-                       zorder=6, edgecolors='white', linewidth=2)
-        
-        ax1.set_title('🎯 Price Action with Ultimate Trading Signals', fontsize=16, pad=15)
-        ax1.set_ylabel('Price (USDT)', fontsize=12)
-        ax1.legend(loc='upper left', fontsize=11)
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. Combined Score
-        ax2 = fig.add_subplot(gs[1])
-        
-        # Color the score line based on signal strength
-        score_colors = []
-        for score in df['combined_score']:
-            if score >= 80:
-                score_colors.append('darkgreen')
-            elif score >= 60:
-                score_colors.append('green')
-            elif score <= 20:
-                score_colors.append('darkred')
-            elif score <= 40:
-                score_colors.append('red')
-            else:
-                score_colors.append('gray')
-        
-        ax2.plot(df['timestamp'], df['combined_score'], linewidth=3, color='blue', alpha=0.8)
-        ax2.axhline(y=80, color='darkgreen', linestyle='--', alpha=0.8, label='Strong Buy (80)')
-        ax2.axhline(y=60, color='green', linestyle='--', alpha=0.8, label='Buy (60)')
-        ax2.axhline(y=50, color='gray', linestyle='-', alpha=0.6, label='Neutral')
-        ax2.axhline(y=40, color='red', linestyle='--', alpha=0.8, label='Sell (40)')
-        ax2.axhline(y=20, color='darkred', linestyle='--', alpha=0.8, label='Strong Sell (20)')
-        
-        # Fill zones
-        ax2.fill_between(df['timestamp'], 80, 100, alpha=0.1, color='darkgreen')
-        ax2.fill_between(df['timestamp'], 60, 80, alpha=0.1, color='green')
-        ax2.fill_between(df['timestamp'], 40, 60, alpha=0.1, color='gray')
-        ax2.fill_between(df['timestamp'], 20, 40, alpha=0.1, color='red')
-        ax2.fill_between(df['timestamp'], 0, 20, alpha=0.1, color='darkred')
-        
-        ax2.set_title('📊 Ultimate Combined Score (0-100)', fontsize=14, pad=10)
-        ax2.set_ylabel('Score', fontsize=12)
-        ax2.set_ylim(0, 100)
-        ax2.legend(loc='upper right', fontsize=10)
-        ax2.grid(True, alpha=0.3)
-        
-        # 3. Individual Signal Scores
-        ax3 = fig.add_subplot(gs[2])
-        ax3.plot(df['timestamp'], df['score_trade_bulls'], label='Trade Bulls', linewidth=2, alpha=0.8)
-        ax3.plot(df['timestamp'], df['score_rsi'], label='RSI', linewidth=2, alpha=0.8)
-        ax3.plot(df['timestamp'], df['score_macd'], label='MACD', linewidth=2, alpha=0.8)
-        ax3.plot(df['timestamp'], df['score_bollinger'], label='Bollinger', linewidth=2, alpha=0.8)
-        ax3.plot(df['timestamp'], df['score_volume'], label='Volume', linewidth=2, alpha=0.8)
-        
-        ax3.axhline(y=50, color='gray', linestyle='-', alpha=0.5)
-        ax3.set_title('🔬 Individual Signal Component Scores', fontsize=14, pad=10)
-        ax3.set_ylabel('Score', fontsize=12)
-        ax3.set_ylim(0, 100)
-        ax3.legend(loc='upper right', fontsize=10)
-        ax3.grid(True, alpha=0.3)
-        
-        # 4. Confidence Level
-        ax4 = fig.add_subplot(gs[3])
-        confidence_colors = ['darkgreen' if c >= 80 else 'green' if c >= 70 else 'orange' if c >= 60 else 'red' 
-                           for c in df['confidence']]
-        
-        bars = ax4.bar(df['timestamp'], df['confidence'], color=confidence_colors, alpha=0.7, width=0.8)
-        ax4.axhline(y=80, color='darkgreen', linestyle='--', alpha=0.8, label='High Confidence')
-        ax4.axhline(y=60, color='orange', linestyle='--', alpha=0.8, label='Medium Confidence')
-        
-        ax4.set_title('🎯 Signal Confidence Level', fontsize=14, pad=10)
-        ax4.set_ylabel('Confidence %', fontsize=12)
-        ax4.set_ylim(0, 100)
-        ax4.legend(loc='upper right', fontsize=10)
-        ax4.grid(True, alpha=0.3)
-        
-        # 5. Signal Distribution
-        ax5 = fig.add_subplot(gs[4])
-        
-        # Calculate signal statistics for the period
-        signal_counts = df['ultimate_signal'].value_counts()
-        colors_map = {
-            'STRONG_BUY': 'darkgreen',
-            'BUY': 'green', 
-            'HOLD': 'gray',
-            'SELL': 'red',
-            'STRONG_SELL': 'darkred'
-        }
-        
-        signals = list(signal_counts.index)
-        counts = list(signal_counts.values)
-        colors = [colors_map.get(signal, 'gray') for signal in signals]
-        
-        bars = ax5.bar(signals, counts, color=colors, alpha=0.8)
-        ax5.set_title('📈 Signal Distribution (Last 7 Days)', fontsize=14, pad=10)
-        ax5.set_ylabel('Number of Hours', fontsize=12)
-        ax5.grid(True, alpha=0.3, axis='y')
-        
-        # Add value labels on bars
-        for bar, count in zip(bars, counts):
-            height = bar.get_height()
-            ax5.text(bar.get_x() + bar.get_width()/2., height + 0.5,
-                    f'{count}', ha='center', va='bottom', fontweight='bold')
-        
-        # Format all axes
-        for ax in [ax1, ax2, ax3, ax4, ax5]:
-            ax.tick_params(axis='x', rotation=45, labelsize=10)
-            ax.tick_params(axis='y', labelsize=10)
-        
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.95)
-        plt.show()
-        
-        print(f"🎯 Ultimate signals dashboard created for {clean_symbol}")
-    
     def generate_ultimate_report(self, df, symbol='BTC_USDT'):
         """Generate comprehensive ultimate trading report"""
         print(f"\n🚀 ULTIMATE CRYPTO SIGNALS REPORT - {symbol}")
@@ -437,16 +486,14 @@ class UltimateSignalCombiner:
         confidence = df['confidence'].iloc[-1]
         
         # Signal strength emoji
-        if current_signal == 'STRONG_BUY':
-            signal_emoji = '🟢🟢'
-        elif current_signal == 'BUY':
-            signal_emoji = '🟢'
-        elif current_signal == 'SELL':
-            signal_emoji = '🔴'
-        elif current_signal == 'STRONG_SELL':
-            signal_emoji = '🔴🔴'
-        else:
-            signal_emoji = '🟡'
+        signal_emojis = {
+            'STRONG_BUY': '🟢🟢',
+            'BUY': '🟢',
+            'SELL': '🔴',
+            'STRONG_SELL': '🔴🔴',
+            'HOLD': '🟡'
+        }
+        signal_emoji = signal_emojis.get(current_signal, '🟡')
         
         print(f"💰 Current Price: ${current_price:,.2f}")
         print(f"🎯 Ultimate Signal: {signal_emoji} {current_signal}")
@@ -481,7 +528,7 @@ class UltimateSignalCombiner:
                 signal_changes.append((timestamp, signal, price))
         
         if signal_changes:
-            for timestamp, signal, price in signal_changes[-5:]:  # Last 5 changes
+            for timestamp, signal, price in signal_changes[-5:]:
                 print(f"   📅 {timestamp}: {signal} at ${price:,.2f}")
         else:
             print(f"   ⚪ No signal changes - steady {current_signal}")
@@ -538,35 +585,21 @@ class UltimateSignalCombiner:
             vol_status = "HIGH" if volatility > 5 else "MEDIUM" if volatility > 2 else "LOW"
             print(f"   🌊 Volatility: {vol_status} ({volatility:.2f}%)")
 
-def load_and_analyze_ultimate_signals(symbol='BTC_USDT'):
-    """Load data and generate ultimate signals"""
-    filename = f"data/{symbol}_1h_7days.csv"
+def load_and_analyze_ultimate_signals(symbol='BTC/USDT', timeframe='1h', db_path='data/multi_timeframe_data.db'):
+    """Load data from database and generate ultimate signals"""
     
     try:
-        df = pd.read_csv(filename)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp').reset_index(drop=True)
+        # Initialize database manager
+        db_manager = DatabaseManager(db_path)
         
-        print(f"✅ Loaded {len(df)} records for {symbol}")
+        # Load data from database
+        df = db_manager.load_crypto_data(symbol, timeframe, limit_hours=168)  # 7 days
         
-        # Try to add existing analysis if available
-        try:
-            # Import and apply Trade Bulls strategy
-            from trade_bulls_strategy import TradeBullsStrategy
-            trade_bulls = TradeBullsStrategy()
-            df, _ = trade_bulls.analyze_crypto(df)
-            print("✅ Trade Bulls analysis integrated")
-        except:
-            print("⚠️ Trade Bulls strategy not available, using basic signals")
+        if df is None or df.empty:
+            print(f"❌ No data available for {symbol} ({timeframe})")
+            return None, None, None
         
-        try:
-            # Import and apply Technical Indicators
-            from technical_indicators import TechnicalIndicators
-            tech_indicators = TechnicalIndicators()
-            df = tech_indicators.analyze_crypto_indicators(df)
-            print("✅ Technical indicators integrated")
-        except:
-            print("⚠️ Technical indicators not available, using basic analysis")
+        print(f"✅ Loaded {len(df)} records for {symbol} ({timeframe})")
         
         # Apply Ultimate Signal Combiner
         ultimate = UltimateSignalCombiner()
@@ -575,40 +608,43 @@ def load_and_analyze_ultimate_signals(symbol='BTC_USDT'):
         # Generate alerts
         alerts = ultimate.generate_trading_alerts(df)
         
-        # Create dashboard
-        ultimate.create_ultimate_dashboard(df, symbol)
-        
-        # Generate report
+        # Generate report (NO CHARTS)
         ultimate.generate_ultimate_report(df, symbol)
         
         # Display recent alerts
         if alerts:
             print(f"\n🔔 RECENT TRADING ALERTS:")
-            for alert in alerts[-3:]:  # Show last 3 alerts
+            for alert in alerts[-3:]:
                 timestamp = alert['timestamp'].strftime('%Y-%m-%d %H:%M')
                 print(f"   📅 {timestamp}: {alert['signal']} at ${alert['price']:.2f} (Confidence: {alert['confidence']:.1f}%)")
         
         return df, alerts, ultimate
         
-    except FileNotFoundError:
-        print(f"❌ File not found: {filename}")
-        print("💡 Run crypto_data_collector.py first!")
-        return None, None, None
     except Exception as e:
         print(f"❌ Error analyzing {symbol}: {e}")
         return None, None, None
 
-def compare_ultimate_signals():
-    """Compare ultimate signals across all cryptocurrencies"""
-    print(f"\n🔥 ULTIMATE SIGNALS COMPARISON")
+def compare_ultimate_signals(db_path='data/multi_timeframe_data.db', timeframe='1h'):
+    """Compare ultimate signals across all cryptocurrencies from database"""
+    print(f"\n🔥 ULTIMATE SIGNALS COMPARISON ({timeframe})")
     print("=" * 70)
     
-    symbols = ['BTC_USDT', 'ETH_USDT', 'BNB_USDT']
+    # Get available symbols from database
+    db_manager = DatabaseManager(db_path)
+    symbols = db_manager.get_available_symbols()
+    
+    if not symbols:
+        print("❌ No symbols found in database")
+        return
+    
+    print(f"📊 Found {len(symbols)} symbols in database: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}")
+    
     results = []
     
-    for symbol in symbols:
+    # Analyze top symbols (limit to avoid too much output)
+    for symbol in symbols[:5]:  # Limit to first 5 symbols
         print(f"\n📊 Analyzing {symbol}...")
-        df, alerts, ultimate = load_and_analyze_ultimate_signals(symbol)
+        df, alerts, ultimate = load_and_analyze_ultimate_signals(symbol, timeframe, db_path)
         
         if df is not None:
             current_price = df['close'].iloc[-1]
@@ -617,7 +653,7 @@ def compare_ultimate_signals():
             confidence = df['confidence'].iloc[-1]
             
             results.append({
-                'Symbol': symbol.replace('_USDT', ''),
+                'Symbol': symbol,
                 'Price': f"${current_price:,.2f}",
                 'Signal': current_signal,
                 'Score': f"{combined_score:.1f}",
@@ -665,96 +701,60 @@ def compare_ultimate_signals():
         else:
             print(f"   ⚖️ NEUTRAL: Mixed signals across cryptos")
 
-def create_alerts_system(symbols=['BTC_USDT', 'ETH_USDT', 'BNB_USDT']):
-    """Create a monitoring system for ultimate signals"""
-    print(f"\n🔔 ULTIMATE SIGNALS ALERT SYSTEM")
-    print("=" * 50)
-    
-    all_alerts = []
-    
-    for symbol in symbols:
-        df, alerts, ultimate = load_and_analyze_ultimate_signals(symbol)
-        
-        if df is not None and alerts:
-            for alert in alerts:
-                alert['symbol'] = symbol
-                all_alerts.append(alert)
-    
-    # Sort alerts by timestamp
-    all_alerts.sort(key=lambda x: x['timestamp'], reverse=True)
-    
-    # Display recent alerts
-    print(f"📡 RECENT MARKET ALERTS (Last 24 Hours):")
-    
-    recent_alerts = [a for a in all_alerts if a['timestamp'] >= datetime.now() - pd.Timedelta(hours=24)]
-    
-    if recent_alerts:
-        for alert in recent_alerts[:10]:  # Show top 10 recent alerts
-            symbol = alert['symbol'].replace('_USDT', '')
-            timestamp = alert['timestamp'].strftime('%H:%M')
-            signal = alert['signal']
-            price = alert['price']
-            confidence = alert['confidence']
-            
-            signal_emoji = {
-                'STRONG_BUY': '🟢🟢',
-                'BUY': '🟢',
-                'SELL': '🔴',
-                'STRONG_SELL': '🔴🔴'
-            }.get(signal, '🟡')
-            
-            print(f"   {timestamp} | {symbol:3} | {signal_emoji} {signal:11} | ${price:8,.2f} | {confidence:5.1f}%")
-    else:
-        print(f"   ⚪ No recent alerts - markets are stable")
-    
-    return all_alerts
-
 def main():
-    """Main function to run Ultimate Signal Combiner"""
-    print("🚀 ULTIMATE CRYPTO SIGNALS - COMBINED SYSTEM")
-    print("=" * 60)
+    """Main function - DATABASE VERSION"""
+    print("🚀 ULTIMATE CRYPTO SIGNALS - FIXED DATABASE VERSION")
+    print("=" * 65)
     print("🔥 Trade Bulls + Technical Indicators = Maximum Accuracy")
-    print("=" * 60)
+    print("💾 Reading from data/multi_timeframe_data.db")
+    print("=" * 65)
     
-    # Run individual analysis
-    symbols = ['BTC_USDT', 'ETH_USDT', 'BNB_USDT']
-    
-    # Option 1: Analyze individual crypto
-    print("\n🎯 Choose Analysis Mode:")
-    print("1. 📊 Individual Analysis (detailed charts for each crypto)")
-    print("2. 🔍 Quick Comparison (summary across all cryptos)")
-    print("3. 🔔 Alert System (recent trading alerts)")
-    print("4. 🚀 Full Analysis (everything)")
-    
-    # For demo, run full analysis
-    mode = "4"  # You can change this or add user input
-    
-    if mode == "1":
-        for symbol in symbols:
-            print(f"\n{'='*20} {symbol} {'='*20}")
-            load_and_analyze_ultimate_signals(symbol)
-    
-    elif mode == "2":
-        compare_ultimate_signals()
-    
-    elif mode == "3":
-        create_alerts_system()
-    
-    else:  # mode == "4" - Full analysis
-        # Individual analysis
-        for symbol in symbols:
-            print(f"\n{'='*25} {symbol} {'='*25}")
-            load_and_analyze_ultimate_signals(symbol)
+    try:
+        # Initialize database manager and check available data
+        db_manager = DatabaseManager('data/multi_timeframe_data.db')
+        
+        # Display data status first
+        db_manager.display_data_status()
+        
+        symbols = db_manager.get_available_symbols()
+        timeframes = db_manager.get_available_timeframes()
+        
+        if not symbols:
+            print("\n❌ No data found in database!")
+            print("💡 Run the multi-timeframe data collector first!")
+            return
+        
+        print(f"\n📊 Analysis will use the most recent data available")
+        print(f"💡 Available symbols: {', '.join(symbols[:10])}{'...' if len(symbols) > 10 else ''}")
+        print(f"⏱️  Available timeframes: {', '.join(timeframes)}")
+        
+        # Select timeframe
+        timeframe = '1h'  # Default to 1h, you can change this
+        if timeframe not in timeframes:
+            timeframe = timeframes[0] if timeframes else '1h'
+            print(f"⚠️ Using timeframe: {timeframe}")
+        
+        # Individual analysis for top symbols (use the symbols from database)
+        analyze_symbols = symbols[:3] if len(symbols) >= 3 else symbols  # Analyze top 3 symbols
+        
+        for symbol in analyze_symbols:
+            print(f"\n{'='*25} {symbol} ({timeframe}) {'='*25}")
+            load_and_analyze_ultimate_signals(symbol, timeframe, 'data/multi_timeframe_data.db')
         
         # Comparison
-        compare_ultimate_signals()
+        compare_ultimate_signals(db_path='data/multi_timeframe_data.db', timeframe=timeframe)
         
-        # Alerts
-        create_alerts_system()
-    
-    print(f"\n🎉 Ultimate Signals Analysis Complete!")
-    print(f"🔥 You now have the most advanced crypto trading signals!")
-    print(f"💡 Combining multiple strategies gives you professional-grade insights!")
+        print(f"\n🎉 Ultimate Signals Analysis Complete!")
+        print(f"🔥 You now have the most advanced crypto trading signals from your database!")
+        print(f"💡 All data comes from your latest database collection!")
+        
+    except FileNotFoundError as e:
+        print(f"❌ Database file not found: {e}")
+        print("💡 Make sure you've run multi_timeframe_collector.py first!")
+        print("💡 The database should be at: data/multi_timeframe_data.db")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        print("💡 Check your database file and try again!")
 
 if __name__ == "__main__":
     main()

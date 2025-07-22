@@ -257,7 +257,7 @@ class EnhancedMultiTimeframeCollector:
                         INSERT OR REPLACE INTO collection_status 
                         (symbol, timeframe, last_update, records_count, status, last_timestamp)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (symbol, timeframe, datetime.now(), len(df), 'SUCCESS', df['timestamp'].max()))
+                    """, (symbol, timeframe, datetime.now(), len(df), 'SUCCESS', df['timestamp'].max().strftime('%Y-%m-%d %H:%M:%S')))
                     
                     conn.commit()
                     conn.close()
@@ -325,7 +325,7 @@ class EnhancedMultiTimeframeCollector:
             records_saved = self.save_to_database(df, replace_existing=force_update)
             
             # Update status
-            self.update_collection_status(symbol, timeframe, len(df), 'SUCCESS', df['timestamp'].max())
+            self.update_collection_status(symbol, timeframe, len(df), 'SUCCESS', df['timestamp'].max().strftime('%Y-%m-%d %H:%M:%S'))
             
             latest_time = df['timestamp'].max()
             minutes_ago = (datetime.now() - latest_time).total_seconds() / 60

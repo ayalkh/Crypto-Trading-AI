@@ -1,0 +1,49 @@
+{
+    "data_collection": {
+        "enabled": true,
+        "interval_minutes": 60,
+        "symbols": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT"
+        ],
+        "timeframes": [
+            "5m",
+            "15m",
+            "1h",
+            "4h"
+        ]
+    },
+    "signal_analysis": {
+        "enabled": true,
+        "interval_minutes": 15,
+        "confidence_threshold": 75
+    },
+    "alerts": {
+        "enabled": true,
+        "email": {
+            "enabled": false,
+            "smtp_server": "smtp.gmail.com",
+            "smtp_port": 587,
+            "username": "your_email@gmail.com",
+            "password": "your_app_password",
+            "to_email": "your_email@gmail.com"
+        },
+        "desktop": {
+            "enabled": true
+        },
+        "log_file": {
+            "enabled": true
+        }
+    },
+    "performance_tracking": {
+        "enabled": true,
+        "interval_hours": 6,
+        "daily_report": true
+    },
+    "system": {
+        "max_errors": 10,
+        "error_cooldown_minutes": 30,
+        "cleanup_interval_hours": 24
+    }
+}

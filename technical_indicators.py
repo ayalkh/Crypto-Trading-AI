@@ -334,7 +334,7 @@ class TechnicalIndicators:
 
         
         # Create 4 subplots with proper spacing
-        gs = fig.add_gridspec(3, 1, height_ratios=[2, 1, 1, 1], hspace=0.4)
+        gs = fig.add_gridspec(4, 1, height_ratios=[2, 1, 1, 1], hspace=0.4)
         
         # 1. Price with Bollinger Bands and Signals
         ax1 = fig.add_subplot(gs[0])
@@ -406,7 +406,42 @@ class TechnicalIndicators:
         ax3.legend(loc='upper left', fontsize=10)
         ax3.grid(True, alpha=0.3)
         
-    
+        # 4. Volume Analysis
+        ax4 = fig.add_subplot(gs[3])
+        
+        # Volume bars with better colors
+        volume_colors = []
+        for i in range(len(df)):
+            if i == 0:
+                volume_colors.append('gray')
+            elif df['close'].iloc[i] >= df['close'].iloc[i-1]:
+                volume_colors.append('green')
+            else:
+                volume_colors.append('red')
+        
+        ax4.bar(df['timestamp'], df['volume'], color=volume_colors, 
+               alpha=0.7, label='Volume', width=0.8)
+        
+        ax4.plot(df['timestamp'], df['volume_volume_sma_long'], color='orange', 
+                linewidth=3, label=f'Volume SMA ({self.volume_sma_long})', alpha=0.8)
+        
+        # Mark volume spikes with better visibility
+        volume_spikes = df[df['volume_volume_spikes']]
+        if not volume_spikes.empty:
+            ax4.scatter(volume_spikes['timestamp'], volume_spikes['volume'], 
+                       color='yellow', marker='*', s=150, label='Volume Spikes', 
+                       zorder=5, edgecolors='orange', linewidth=1)
+        
+        ax4.set_title('Volume Analysis & Spikes', fontsize=14, pad=10)
+        ax4.set_ylabel('Volume', fontsize=12)
+        ax4.set_xlabel('Date & Time', fontsize=12)
+        ax4.legend(loc='upper left', fontsize=10)
+        ax4.grid(True, alpha=0.3)
+        
+        # Format x-axis for better readability
+        for ax in [ax1, ax2, ax3, ax4]:
+            ax.tick_params(axis='x', rotation=45, labelsize=9)
+            ax.tick_params(axis='y', labelsize=10)
         
         # Adjust layout
         plt.tight_layout()

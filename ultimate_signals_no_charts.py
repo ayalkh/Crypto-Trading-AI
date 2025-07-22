@@ -484,7 +484,7 @@ def main():
     
     # Run analysis for all cryptos
     symbols = ['BTC_USDT', 'ETH_USDT', 'BNB_USDT']
-    
+    s
     # Individual analysis
     for symbol in symbols:
         print(f"\n{'='*25} {symbol} {'='*25}")
