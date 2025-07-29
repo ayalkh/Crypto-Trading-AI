@@ -2,7 +2,19 @@
 Integrated Ultimate Multi-Timeframe Signal Analyzer
 Combines Multi-Timeframe Analysis + Ultimate Signal Combiner for Maximum Accuracy
 """
+import sys
+import os
 
+# Fix Windows encoding issues with emojis
+if sys.platform.startswith('win'):
+    try:
+        # Try to set UTF-8 encoding for stdout
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        # If reconfigure doesn't work, try alternative
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
 import pandas as pd
 import numpy as np
 import sqlite3

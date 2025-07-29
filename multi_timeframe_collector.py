@@ -2,16 +2,26 @@
 Enhanced Multi-Timeframe Crypto Data Collector
 Includes diagnostics, fresh data forcing, and better update handling
 """
+import os
+import sys
 
+if sys.platform.startswith('win'):
+    try:
+        # Try to set UTF-8 encoding for stdout
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        # If reconfigure doesn't work, try alternative
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'replace')
 import ccxt
 import pandas as pd
 import time
-import os
 import sqlite3
 from datetime import datetime, timedelta
 import json
 import logging
-import sys
 import argparse
 
 # Fix Windows console encoding issues

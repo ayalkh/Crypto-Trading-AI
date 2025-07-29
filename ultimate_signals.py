@@ -2,7 +2,19 @@
 Ultimate Crypto Trading Signals - Fixed Database Version
 Uses data/multi_timeframe_data.db with proper error handling
 """
+import sys
+import os
 
+# Fix Windows encoding issues with emojis
+if sys.platform.startswith('win'):
+    try:
+        # Try to set UTF-8 encoding for stdout
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        # If reconfigure doesn't work, try alternative
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
 import pandas as pd
 import numpy as np
 import sqlite3
