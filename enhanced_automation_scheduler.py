@@ -2,6 +2,17 @@
 Enhanced 24/7 Crypto Trading Automation System
 Compatible with your multi_timeframe_collector and multi_timeframe_analyzer
 """
+import os
+import sys
+
+# Fix encoding issues on Windows
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
 
 import schedule
 import time
@@ -9,14 +20,12 @@ import threading
 import smtplib
 import logging
 import json
-import os
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import sqlite3
 import pandas as pd
 import subprocess
-import sys
 
 # Configure logging
 logging.basicConfig(

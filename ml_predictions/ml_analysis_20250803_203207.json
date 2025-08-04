@@ -1,0 +1,20 @@
+{
+  "timestamp": "2025-08-03T20:32:07.420402",
+  "symbols": {
+    "BTC/USDT": {
+      "error": "Found array with 0 feature(s) (shape=(1, 0)) while a minimum of 1 is required by StandardScaler."
+    },
+    "ETH/USDT": {
+      "error": "Found array with 0 feature(s) (shape=(1, 0)) while a minimum of 1 is required by StandardScaler."
+    },
+    "BNB/USDT": {
+      "error": "Found array with 0 feature(s) (shape=(1, 0)) while a minimum of 1 is required by StandardScaler."
+    }
+  },
+  "summary": {
+    "total_symbols": 3,
+    "buy_signals": 0,
+    "sell_signals": 0,
+    "hold_signals": 0
+  }
+}

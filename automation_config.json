@@ -37,7 +37,7 @@
             "to_email": "your_email@gmail.com"
         },
         "desktop": {
-            "enabled": true
+            "enabled": false
         },
         "log_file": {
             "enabled": true
