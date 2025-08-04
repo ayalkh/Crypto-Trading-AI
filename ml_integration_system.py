@@ -510,198 +510,215 @@ class CryptoMLSystem:
         logging.info(f"✅ LSTM model trained and saved: {model_path}")
         return True
     
-def make_predictions(self, symbol: str, timeframe: str = '1h') -> Dict:
-    """Make predictions using trained models"""
-    logging.info(f"🔮 Making predictions for {symbol} {timeframe}")
+    def make_predictions(self, symbol: str, timeframe: str = '1h') -> Dict:
+        """Make predictions using trained models"""
+        logging.info(f"🔮 Making predictions for {symbol} {timeframe}")
+        
+        # Load recent data
+        df = self.load_data(symbol, timeframe, days_back=7)
+        if df.empty:
+            logging.warning(f"⚠️ No data available for {symbol} {timeframe}")
+            return {}
+        
+        df_features = self.create_features(df)
+        if df_features.empty:
+            logging.warning(f"⚠️ No features could be created for {symbol} {timeframe}")
+            return {}
+        
+        predictions = {}
+        
+        try:
+            # Price prediction
+            price_model_key = f"{symbol}_{timeframe}_price"
+            if price_model_key in self.models:
+                # Make sure we have the same features as during training
+                scaler_key = f"{symbol}_{timeframe}"
+                if scaler_key in self.scalers:
+                    # Get the latest data point
+                    if len(df_features) > 0:
+                        # Use all available feature columns from the dataframe
+                        exclude_cols = ['open', 'high', 'low', 'close', 'volume']
+                        available_features = [col for col in df_features.columns if col not in exclude_cols]
+                        
+                        if len(available_features) > 0:
+                            X_latest = df_features[available_features].iloc[-1:].values
+                            
+                            if X_latest.shape[1] > 0:  # Make sure we have features
+                                scaler = self.scalers[scaler_key]
+                                X_scaled = scaler.transform(X_latest)
+                                pred = self.models[price_model_key].predict(X_scaled)[0]
+                                predictions['price_change'] = pred
+                                predictions['predicted_price'] = df['close'].iloc[-1] * (1 + pred)
+                                logging.info(f"✅ Price prediction: {pred:.4f}")
+                            else:
+                                logging.warning(f"⚠️ No valid features for price prediction")
+                        else:
+                            logging.warning(f"⚠️ No feature columns available for price prediction")
+                    else:
+                        logging.warning(f"⚠️ No data points available for price prediction")
+                else:
+                    logging.warning(f"⚠️ No scaler found for {scaler_key}")
+            else:
+                logging.info(f"ℹ️ No price model found for {price_model_key}")
+        
+        except Exception as e:
+            logging.error(f"❌ Price prediction failed: {e}")
+        
+        try:
+            # Direction prediction
+            direction_model_key = f"{symbol}_{timeframe}_direction"
+            if direction_model_key in self.models:
+                scaler_key = f"{symbol}_{timeframe}"
+                if scaler_key in self.scalers:
+                    if len(df_features) > 0:
+                        exclude_cols = ['open', 'high', 'low', 'close', 'volume']
+                        available_features = [col for col in df_features.columns if col not in exclude_cols]
+                        
+                        if len(available_features) > 0:
+                            X_latest = df_features[available_features].iloc[-1:].values
+                            
+                            if X_latest.shape[1] > 0:
+                                scaler = self.scalers[scaler_key]
+                                X_scaled = scaler.transform(X_latest)
+                                
+                                direction_pred = self.models[direction_model_key].predict(X_scaled)[0]
+                                direction_prob = self.models[direction_model_key].predict_proba(X_scaled)[0]
+                                
+                                predictions['direction'] = 'UP' if direction_pred == 1 else 'DOWN'
+                                predictions['direction_probability'] = max(direction_prob)
+                                logging.info(f"✅ Direction prediction: {predictions['direction']} ({predictions['direction_probability']:.4f})")
+                            else:
+                                logging.warning(f"⚠️ No valid features for direction prediction")
+                        else:
+                            logging.warning(f"⚠️ No feature columns available for direction prediction")
+                    else:
+                        logging.warning(f"⚠️ No data points available for direction prediction")
+            else:
+                logging.info(f"ℹ️ No direction model found for {direction_model_key}")
+                
+        except Exception as e:
+            logging.error(f"❌ Direction prediction failed: {e}")
+        
+        # Skip LSTM prediction for now due to Keras compatibility issues
+        try:
+            lstm_model_key = f"{symbol}_{timeframe}_lstm"
+            if lstm_model_key in self.models and DL_AVAILABLE:
+                sequence_length = 60
+                if len(df) >= sequence_length:
+                    prices = df['close'].values[-sequence_length:].reshape(-1, 1)
+                    scaler = self.scalers.get(lstm_model_key)
+                    
+                    if scaler is not None:
+                        scaled_prices = scaler.transform(prices)
+                        X_lstm = scaled_prices.reshape(1, sequence_length, 1)
+                        
+                        try:
+                            lstm_pred = self.models[lstm_model_key].predict(X_lstm, verbose=0)[0][0]
+                            lstm_price = scaler.inverse_transform([[lstm_pred]])[0][0]
+                            
+                            predictions['lstm_predicted_price'] = lstm_price
+                            predictions['lstm_price_change'] = lstm_price / df['close'].iloc[-1] - 1
+                            logging.info(f"✅ LSTM prediction: {predictions['lstm_price_change']:.4f}")
+                        except Exception as lstm_e:
+                            logging.warning(f"⚠️ LSTM prediction failed (compatibility issue): {lstm_e}")
+                    else:
+                        logging.warning(f"⚠️ No LSTM scaler found")
+                else:
+                    logging.warning(f"⚠️ Insufficient data for LSTM (need {sequence_length}, have {len(df)})")
+            else:
+                logging.info(f"ℹ️ No LSTM model found or TensorFlow not available")
+                
+        except Exception as e:
+            logging.warning(f"⚠️ LSTM prediction skipped: {e}")
+        
+        if predictions:
+            logging.info(f"✅ Generated {len(predictions)} predictions for {symbol} {timeframe}")
+        else:
+            logging.warning(f"⚠️ No predictions generated for {symbol} {timeframe}")
+        
+        return predictions
     
-    # Load recent data
-    df = self.load_data(symbol, timeframe, days_back=7)
-    if df.empty:
-        logging.warning(f"⚠️ No data available for {symbol} {timeframe}")
-        return {}
+    def load_models(self, symbol: str, timeframe: str):
+        """Load saved models from disk with better error handling"""
+        model_files_info = [
+            ('price', ['random_forest', 'xgboost', 'gradient_boosting']),
+            ('direction', ['random_forest', 'logistic_regression', 'xgboost'])
+        ]
+        
+        # Load traditional ML models
+        for model_type, model_names in model_files_info:
+            for model_name in model_names:
+                model_path = f"ml_models/{symbol}_{timeframe}_{model_type}_{model_name}.joblib"
+                scaler_path = f"ml_models/{symbol}_{timeframe}_{model_type}_scaler.joblib"
+                
+                if os.path.exists(model_path) and os.path.exists(scaler_path):
+                    try:
+                        model = joblib.load(model_path)
+                        scaler = joblib.load(scaler_path)
+                        
+                        # Use the most recent model for each type
+                        self.models[f"{symbol}_{timeframe}_{model_type}"] = model
+                        self.scalers[f"{symbol}_{timeframe}"] = scaler
+                        
+                        logging.info(f"✅ Loaded {model_type} model: {model_name}")
+                        break  # Use the first model found for each type
+                        
+                    except Exception as e:
+                        logging.error(f"❌ Failed to load {model_path}: {e}")
+                        continue
+        
+        # Load LSTM model with better error handling
+        lstm_path = f"ml_models/{symbol}_{timeframe}_lstm.h5"
+        lstm_scaler_path = f"ml_models/{symbol}_{timeframe}_lstm_scaler.joblib"
+        
+        if os.path.exists(lstm_path) and os.path.exists(lstm_scaler_path) and DL_AVAILABLE:
+            try:
+                # Try to load LSTM model with custom objects handling
+                from tensorflow.keras.models import load_model
+                import tensorflow.keras.metrics as metrics
+                
+                # Define custom objects to handle compatibility issues
+                custom_objects = {
+                    'mse': metrics.MeanSquaredError(),
+                    'mean_squared_error': metrics.MeanSquaredError()
+                }
+                
+                model = load_model(lstm_path, custom_objects=custom_objects, compile=False)
+                scaler = joblib.load(lstm_scaler_path)
+                
+                # Recompile the model with current TensorFlow version
+                from tensorflow.keras.optimizers import Adam
+                model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+                
+                self.models[f"{symbol}_{timeframe}_lstm"] = model
+                self.scalers[f"{symbol}_{timeframe}_lstm"] = scaler
+                
+                logging.info("✅ Loaded LSTM model with compatibility fix")
+                
+            except Exception as e:
+                logging.error(f"❌ Failed to load LSTM model: {e}")
+                logging.info("ℹ️ LSTM predictions will be skipped due to compatibility issues")
+        elif os.path.exists(lstm_path):
+            logging.warning("⚠️ LSTM model found but TensorFlow not available")
+        else:
+            logging.info("ℹ️ No LSTM model found")
     
-    df_features = self.create_features(df)
-    if df_features.empty:
-        logging.warning(f"⚠️ No features could be created for {symbol} {timeframe}")
-        return {}
-    
-    predictions = {}
-    
-    try:
-        # Price prediction
+    def get_feature_importance(self, symbol: str, timeframe: str) -> Dict:
+        """Get feature importance from trained models"""
+        importance_dict = {}
+        
+        # Price model feature importance
         price_model_key = f"{symbol}_{timeframe}_price"
         if price_model_key in self.models:
-            # Make sure we have the same features as during training
-            scaler_key = f"{symbol}_{timeframe}"
-            if scaler_key in self.scalers:
-                # Get the latest data point
-                if len(df_features) > 0:
-                    # Use all available feature columns from the dataframe
-                    exclude_cols = ['open', 'high', 'low', 'close', 'volume']
-                    available_features = [col for col in df_features.columns if col not in exclude_cols]
-                    
-                    if len(available_features) > 0:
-                        X_latest = df_features[available_features].iloc[-1:].values
-                        
-                        if X_latest.shape[1] > 0:  # Make sure we have features
-                            scaler = self.scalers[scaler_key]
-                            X_scaled = scaler.transform(X_latest)
-                            pred = self.models[price_model_key].predict(X_scaled)[0]
-                            predictions['price_change'] = pred
-                            predictions['predicted_price'] = df['close'].iloc[-1] * (1 + pred)
-                            logging.info(f"✅ Price prediction: {pred:.4f}")
-                        else:
-                            logging.warning(f"⚠️ No valid features for price prediction")
-                    else:
-                        logging.warning(f"⚠️ No feature columns available for price prediction")
-                else:
-                    logging.warning(f"⚠️ No data points available for price prediction")
-            else:
-                logging.warning(f"⚠️ No scaler found for {scaler_key}")
-        else:
-            logging.info(f"ℹ️ No price model found for {price_model_key}")
-    
-    except Exception as e:
-        logging.error(f"❌ Price prediction failed: {e}")
-    
-    try:
-        # Direction prediction
-        direction_model_key = f"{symbol}_{timeframe}_direction"
-        if direction_model_key in self.models:
-            scaler_key = f"{symbol}_{timeframe}"
-            if scaler_key in self.scalers:
-                if len(df_features) > 0:
-                    exclude_cols = ['open', 'high', 'low', 'close', 'volume']
-                    available_features = [col for col in df_features.columns if col not in exclude_cols]
-                    
-                    if len(available_features) > 0:
-                        X_latest = df_features[available_features].iloc[-1:].values
-                        
-                        if X_latest.shape[1] > 0:
-                            scaler = self.scalers[scaler_key]
-                            X_scaled = scaler.transform(X_latest)
-                            
-                            direction_pred = self.models[direction_model_key].predict(X_scaled)[0]
-                            direction_prob = self.models[direction_model_key].predict_proba(X_scaled)[0]
-                            
-                            predictions['direction'] = 'UP' if direction_pred == 1 else 'DOWN'
-                            predictions['direction_probability'] = max(direction_prob)
-                            logging.info(f"✅ Direction prediction: {predictions['direction']} ({predictions['direction_probability']:.4f})")
-                        else:
-                            logging.warning(f"⚠️ No valid features for direction prediction")
-                    else:
-                        logging.warning(f"⚠️ No feature columns available for direction prediction")
-                else:
-                    logging.warning(f"⚠️ No data points available for direction prediction")
-        else:
-            logging.info(f"ℹ️ No direction model found for {direction_model_key}")
-            
-    except Exception as e:
-        logging.error(f"❌ Direction prediction failed: {e}")
-    
-    # Skip LSTM prediction for now due to Keras compatibility issues
-    try:
-        lstm_model_key = f"{symbol}_{timeframe}_lstm"
-        if lstm_model_key in self.models and DL_AVAILABLE:
-            sequence_length = 60
-            if len(df) >= sequence_length:
-                prices = df['close'].values[-sequence_length:].reshape(-1, 1)
-                scaler = self.scalers.get(lstm_model_key)
-                
-                if scaler is not None:
-                    scaled_prices = scaler.transform(prices)
-                    X_lstm = scaled_prices.reshape(1, sequence_length, 1)
-                    
-                    try:
-                        lstm_pred = self.models[lstm_model_key].predict(X_lstm, verbose=0)[0][0]
-                        lstm_price = scaler.inverse_transform([[lstm_pred]])[0][0]
-                        
-                        predictions['lstm_predicted_price'] = lstm_price
-                        predictions['lstm_price_change'] = lstm_price / df['close'].iloc[-1] - 1
-                        logging.info(f"✅ LSTM prediction: {predictions['lstm_price_change']:.4f}")
-                    except Exception as lstm_e:
-                        logging.warning(f"⚠️ LSTM prediction failed (compatibility issue): {lstm_e}")
-                else:
-                    logging.warning(f"⚠️ No LSTM scaler found")
-            else:
-                logging.warning(f"⚠️ Insufficient data for LSTM (need {sequence_length}, have {len(df)})")
-        else:
-            logging.info(f"ℹ️ No LSTM model found or TensorFlow not available")
-            
-    except Exception as e:
-        logging.warning(f"⚠️ LSTM prediction skipped: {e}")
-    
-    if predictions:
-        logging.info(f"✅ Generated {len(predictions)} predictions for {symbol} {timeframe}")
-    else:
-        logging.warning(f"⚠️ No predictions generated for {symbol} {timeframe}")
-    
-    return predictions
-    
-def load_models(self, symbol: str, timeframe: str):
-    """Load saved models from disk with better error handling"""
-    model_files_info = [
-        ('price', ['random_forest', 'xgboost', 'gradient_boosting']),
-        ('direction', ['random_forest', 'logistic_regression', 'xgboost'])
-    ]
-    
-    # Load traditional ML models
-    for model_type, model_names in model_files_info:
-        for model_name in model_names:
-            model_path = f"ml_models/{symbol}_{timeframe}_{model_type}_{model_name}.joblib"
-            scaler_path = f"ml_models/{symbol}_{timeframe}_{model_type}_scaler.joblib"
-            
-            if os.path.exists(model_path) and os.path.exists(scaler_path):
-                try:
-                    model = joblib.load(model_path)
-                    scaler = joblib.load(scaler_path)
-                    
-                    # Use the most recent model for each type
-                    self.models[f"{symbol}_{timeframe}_{model_type}"] = model
-                    self.scalers[f"{symbol}_{timeframe}"] = scaler
-                    
-                    logging.info(f"✅ Loaded {model_type} model: {model_name}")
-                    break  # Use the first model found for each type
-                    
-                except Exception as e:
-                    logging.error(f"❌ Failed to load {model_path}: {e}")
-                    continue
-    
-    # Load LSTM model with better error handling
-    lstm_path = f"ml_models/{symbol}_{timeframe}_lstm.h5"
-    lstm_scaler_path = f"ml_models/{symbol}_{timeframe}_lstm_scaler.joblib"
-    
-    if os.path.exists(lstm_path) and os.path.exists(lstm_scaler_path) and DL_AVAILABLE:
-        try:
-            # Try to load LSTM model with custom objects handling
-            from tensorflow.keras.models import load_model
-            import tensorflow.keras.metrics as metrics
-            
-            # Define custom objects to handle compatibility issues
-            custom_objects = {
-                'mse': metrics.MeanSquaredError(),
-                'mean_squared_error': metrics.MeanSquaredError()
-            }
-            
-            model = load_model(lstm_path, custom_objects=custom_objects, compile=False)
-            scaler = joblib.load(lstm_scaler_path)
-            
-            # Recompile the model with current TensorFlow version
-            from tensorflow.keras.optimizers import Adam
-            model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-            
-            self.models[f"{symbol}_{timeframe}_lstm"] = model
-            self.scalers[f"{symbol}_{timeframe}_lstm"] = scaler
-            
-            logging.info("✅ Loaded LSTM model with compatibility fix")
-            
-        except Exception as e:
-            logging.error(f"❌ Failed to load LSTM model: {e}")
-            logging.info("ℹ️ LSTM predictions will be skipped due to compatibility issues")
-    elif os.path.exists(lstm_path):
-        logging.warning("⚠️ LSTM model found but TensorFlow not available")
-    else:
-        logging.info("ℹ️ No LSTM model found")
+            model = self.models[price_model_key]
+            if hasattr(model, 'feature_importances_'):
+                if len(self.feature_columns) == len(model.feature_importances_):
+                    importance_pairs = list(zip(self.feature_columns, model.feature_importances_))
+                    importance_pairs.sort(key=lambda x: x[1], reverse=True)
+                    importance_dict = dict(importance_pairs)
+        
+        return importance_dict
+
 
 def main():
     """Example usage of the ML system"""
