@@ -1,0 +1,110 @@
+{
+    "data_collection": {
+        "enabled": true,
+        "interval_minutes": 60,
+        "symbols": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT",
+            "ADA/USDT",
+            "DOT/USDT"
+        ],
+        "timeframes": [
+            "5m",
+            "15m",
+            "1h",
+            "4h",
+            "1d"
+        ],
+        "force_update_hours": 24
+    },
+    "signal_analysis": {
+        "enabled": true,
+        "interval_minutes": 15,
+        "confidence_threshold": 75,
+        "analyze_symbols": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT"
+        ]
+    },
+    "machine_learning": {
+        "enabled": true,
+        "model_training": {
+            "enabled": true,
+            "interval_hours": 24,
+            "symbols": [
+                "BTC/USDT",
+                "ETH/USDT",
+                "BNB/USDT"
+            ],
+            "timeframes": [
+                "1h",
+                "4h",
+                "1d"
+            ],
+            "min_data_points": 100,
+            "train_test_split": 0.8
+        },
+        "prediction": {
+            "enabled": true,
+            "interval_minutes": 30,
+            "confidence_threshold": 0.6,
+            "save_predictions": true,
+            "prediction_horizon": 1
+        },
+        "model_types": {
+            "traditional_ml": true,
+            "deep_learning": true,
+            "ensemble": true
+        },
+        "alerts": {
+            "enabled": true,
+            "high_confidence_threshold": 0.8,
+            "significant_change_threshold": 0.05,
+            "send_email": false,
+            "send_desktop": false
+        },
+        "features": {
+            "technical_indicators": true,
+            "price_patterns": true,
+            "volume_analysis": true,
+            "time_features": true,
+            "lag_features": true,
+            "rolling_statistics": true
+        }
+    },
+    "alerts": {
+        "enabled": true,
+        "email": {
+            "enabled": false,
+            "smtp_server": "smtp.gmail.com",
+            "smtp_port": 587,
+            "username": "your_email@gmail.com",
+            "password": "your_app_password",
+            "to_email": "your_email@gmail.com"
+        },
+        "desktop": {
+            "enabled": false
+        },
+        "log_file": {
+            "enabled": true
+        },
+        "webhook": {
+            "enabled": false,
+            "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+        }
+    },
+    "performance_tracking": {
+        "enabled": true,
+        "interval_hours": 6,
+        "daily_report": true,
+        "include_ml_metrics": true
+    },
+    "system": {
+        "max_errors": 10,
+        "error_cooldown_minutes": 30,
+        "cleanup_interval_hours": 24,
+        "database_path": "data/multi_timeframe_data.db"
+    }
+}

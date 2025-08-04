@@ -8,11 +8,9 @@ import os
 # Fix Windows encoding issues with emojis
 if sys.platform.startswith('win'):
     try:
-        # Try to set UTF-8 encoding for stdout
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
     except (AttributeError, OSError):
-        # If reconfigure doesn't work, try alternative
         import codecs
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'replace')
 import pandas as pd
@@ -23,9 +21,8 @@ import warnings
 import logging
 warnings.filterwarnings('ignore')
 
-# Disable matplotlib to prevent charts
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend
+matplotlib.use('Agg')  # Non-interactive backend (no charts)
 
 # Set up logging
 logging.basicConfig(
@@ -78,7 +75,7 @@ class DatabaseManager:
         """Load crypto data from database"""
         try:
             with self.get_connection() as conn:
-                # Calculate the timestamp limit (using datetime, not unix timestamp)
+                # Calculate the timestamp limit using datetime
                 hours_ago = datetime.now() - timedelta(hours=limit_hours)
                 
                 query = """
