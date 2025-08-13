@@ -408,7 +408,7 @@ class EnhancedMultiTimeframeCollector:
         conn.commit()
         conn.close()
     
-    def collect_all_data(self, force_update=False):
+    def collect_all_data(self, force_update=True):
         """Collect data for all symbols and timeframes"""
         start_time = datetime.now()
         mode = "FORCED UPDATE" if force_update else "NORMAL COLLECTION"
@@ -507,7 +507,6 @@ class EnhancedMultiTimeframeCollector:
             
             print(f"\n📈 Summary:")
             print(f"   Total Records: {total_records:,}")
-            print(f"   Fresh Datasets: {fresh_count}/{len(results)}")
             
             if fresh_count == len(results):
                 print("   ✅ All data is fresh and ready for analysis!")

@@ -653,7 +653,6 @@ def main():
         print("💡 Make sure your database has sufficient data!")
     
     print(f"\n🎉 Integrated Ultimate Analysis Complete!")
-    print(f"🔥 You now have the most advanced crypto trading signals available!")
 
 if __name__ == "__main__":
     main()

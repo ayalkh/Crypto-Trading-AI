@@ -26,7 +26,7 @@ class CryptoControlCenter:
         """Display the control center banner"""
         print("🚀 CRYPTO TRADING CONTROL CENTER v" + self.version)
         print("=" * 65)
-        print("🔥 Your Complete AI-Powered Crypto Trading System")
+        print("🔥 AI-Powered Crypto Trading System")
         print("💡 Multi-Timeframe Analysis | Ultimate Signals | 24/7 Automation")
         print("=" * 65)
 
