@@ -24,7 +24,7 @@ class CryptoControlCenter:
     
     def display_banner(self):
         """Display the control center banner"""
-        print("🚀 CRYPTO TRADING CONTROL CENTER v" + self.version)
+        print("🚀 CRYPTO TRADING CONTROL CENTER ")
         print("=" * 65)
         print("🔥 AI-Powered Crypto Trading System")
         print("💡 Multi-Timeframe Analysis | Ultimate Signals | 24/7 Automation")
