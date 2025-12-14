@@ -237,3 +237,4 @@ def get_config(config_file: str = 'automation_config.json') -> Dict[str, Any]:
     loader = ConfigLoader(config_file=config_file)
     return loader.load_config()
 
+
