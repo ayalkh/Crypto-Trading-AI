@@ -5,9 +5,9 @@ Combines Technical Analysis + ML Predictions in one comprehensive system
 Features:
 - Technical Analysis (RSI, MACD, Bollinger Bands, Volume)
 - Multi-timeframe signal combination
-- ML prediction integration (with placeholders)
+- ML prediction integration (FULLY FUNCTIONAL)
 - Unified database access (ml_crypto_data.db)
-- Works immediately with TA, adds ML when models are trained
+- Works with trained ensemble models
 """
 import os
 import sys
@@ -19,6 +19,7 @@ import logging
 import warnings
 import argparse
 import json
+from typing import Dict, Optional
 
 # Fix Windows encoding
 if sys.platform.startswith('win'):
@@ -459,74 +460,391 @@ class TechnicalAnalyzer:
 
 class MLPredictor:
     """
-    ML Prediction system
-    Currently returns neutral predictions until models are trained
+    ML Prediction system - Loads and uses trained ensemble models
     """
     
     def __init__(self, models_dir='ml_models'):
         """Initialize ML predictor"""
         self.models_dir = models_dir
-        self.models_loaded = False
-        self.available_models = {}
+        self.models_cache = {}  # Cache loaded models
+        self.scalers_cache = {}  # Cache loaded scalers
+        self.features_cache = {}  # Cache feature lists
+        self.models_available = False
+        
+        # Check if joblib is available
+        try:
+            import joblib
+            self.joblib = joblib
+            self.joblib_available = True
+        except ImportError:
+            self.joblib_available = False
+            logging.error("❌ joblib not available. Install: pip install joblib")
+            return
         
         # Check if models exist
         if os.path.exists(models_dir):
-            self._check_available_models()
+            self._scan_available_models()
+        else:
+            logging.warning(f"⚠️ Models directory not found: {models_dir}")
         
-        logging.info(f"🤖 ML Predictor initialized (Models loaded: {self.models_loaded})")
+        logging.info(f"🤖 ML Predictor initialized (Models available: {self.models_available})")
     
-    def _check_available_models(self):
-        """Check which models are available"""
+    def _scan_available_models(self):
+        """Scan and count available models"""
         try:
-            import joblib
+            model_files = [f for f in os.listdir(self.models_dir) 
+                          if f.endswith('.joblib') and not f.endswith('_scaler.joblib') 
+                          and not f.endswith('_features.joblib')]
             
-            model_files = [f for f in os.listdir(self.models_dir) if f.endswith('.joblib')]
+            if not model_files:
+                logging.warning("⚠️ No model files found in ml_models/")
+                return
             
-            for model_file in model_files:
-                # Parse filename: symbol_timeframe_type_model.joblib
-                parts = model_file.replace('.joblib', '').split('_')
-                if len(parts) >= 4:
-                    symbol = parts[0] + '/' + parts[1]  # e.g., BTC/USDT
-                    timeframe = parts[2]
-                    model_type = parts[3]
-                    
-                    key = f"{symbol}_{timeframe}_{model_type}"
-                    self.available_models[key] = model_file
-                    self.models_loaded = True
+            # Count models by type
+            price_models = [f for f in model_files if '_price_' in f]
+            direction_models = [f for f in model_files if '_direction_' in f]
             
-            if self.models_loaded:
-                logging.info(f"✅ Found {len(self.available_models)} ML models")
+            logging.info(f"✅ Found trained models:")
+            logging.info(f"   Price models: {len(price_models)}")
+            logging.info(f"   Direction models: {len(direction_models)}")
+            
+            self.models_available = len(price_models) > 0 or len(direction_models) > 0
             
         except Exception as e:
-            logging.warning(f"⚠️ Could not load ML models: {e}")
+            logging.error(f"❌ Error scanning models: {e}")
     
-    def predict(self, symbol, timeframe, df):
+    def _create_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Make ML predictions
+        Create features EXACTLY as done during training
+        Must match optimized_ml_system.py's create_features()
+        """
+        if df.empty or len(df) < 60:
+            return pd.DataFrame()
         
-        Returns neutral predictions if models not available
+        df = df.copy()
+        
+        try:
+            # 1. Basic price features
+            df['price_change'] = df['close'].pct_change()
+            df['high_low_pct'] = (df['high'] - df['low']) / df['low']
+            df['close_open_pct'] = (df['close'] - df['open']) / df['open']
+            
+            # 2. Moving averages
+            for window in [5, 10, 20, 50]:
+                df[f'ma_{window}'] = df['close'].rolling(window).mean()
+                df[f'ma_{window}_ratio'] = df['close'] / df[f'ma_{window}']
+            
+            # 3. RSI
+            for window in [14, 21, 28]:
+                delta = df['close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+                rs = gain / loss
+                df[f'rsi_{window}'] = 100 - (100 / (1 + rs))
+            
+            # 4. MACD
+            ema_12 = df['close'].ewm(span=12).mean()
+            ema_26 = df['close'].ewm(span=26).mean()
+            df['macd'] = ema_12 - ema_26
+            df['macd_signal'] = df['macd'].ewm(span=9).mean()
+            df['macd_histogram'] = df['macd'] - df['macd_signal']
+            
+            # 5. Bollinger Bands
+            window = 20
+            rolling_mean = df['close'].rolling(window).mean()
+            rolling_std = df['close'].rolling(window).std()
+            df['bb_upper'] = rolling_mean + (rolling_std * 2)
+            df['bb_lower'] = rolling_mean - (rolling_std * 2)
+            df['bb_width'] = df['bb_upper'] - df['bb_lower']
+            df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+            
+            # 6. ATR
+            high_low = df['high'] - df['low']
+            high_close = np.abs(df['high'] - df['close'].shift())
+            low_close = np.abs(df['low'] - df['close'].shift())
+            ranges = pd.concat([high_low, high_close, low_close], axis=1)
+            true_range = np.max(ranges, axis=1)
+            df['atr'] = true_range.rolling(14).mean()
+            
+            # 7. Volume indicators
+            df['volume_sma'] = df['volume'].rolling(20).mean()
+            df['volume_ratio'] = df['volume'] / df['volume_sma']
+            df['price_volume'] = df['close'] * df['volume']
+            df['vwap'] = (df['price_volume'].rolling(20).sum() / 
+                          df['volume'].rolling(20).sum())
+            
+            # 8. Volatility features
+            for window in [5, 10, 20]:
+                df[f'volatility_{window}'] = df['price_change'].rolling(window).std()
+                df[f'volatility_ratio_{window}'] = (
+                    df[f'volatility_{window}'] / 
+                    df[f'volatility_{window}'].rolling(50).mean()
+                )
+            
+            # 9. Momentum features
+            for window in [5, 10, 20]:
+                df[f'momentum_{window}'] = df['close'] / df['close'].shift(window) - 1
+                df[f'roc_{window}'] = df['close'].pct_change(window)
+            
+            # 10. Lag features
+            for lag in [1, 2, 3, 5, 10]:
+                df[f'close_lag_{lag}'] = df['close'].shift(lag)
+                df[f'volume_lag_{lag}'] = df['volume'].shift(lag)
+                df[f'price_change_lag_{lag}'] = df['price_change'].shift(lag)
+            
+            # 11. Rolling statistics
+            for window in [5, 10, 20]:
+                df[f'close_mean_{window}'] = df['close'].rolling(window).mean()
+                df[f'close_std_{window}'] = df['close'].rolling(window).std()
+                df[f'volume_mean_{window}'] = df['volume'].rolling(window).mean()
+            
+            # 12. Time features
+            df['hour'] = df['timestamp'].dt.hour
+            df['day_of_week'] = df['timestamp'].dt.dayofweek
+            df['day_of_month'] = df['timestamp'].dt.day
+            df['is_weekend'] = (df['timestamp'].dt.dayofweek >= 5).astype(int)
+            
+            # Drop NaN values
+            df = df.dropna()
+            
+            return df
+            
+        except Exception as e:
+            logging.error(f"❌ Error creating features: {e}")
+            return pd.DataFrame()
+    
+    def _load_model_components(self, symbol: str, timeframe: str, model_type: str):
+        """Load model, scaler, and feature list for a specific configuration"""
+        safe_symbol = symbol.replace('/', '_')
+        cache_key = f"{safe_symbol}_{timeframe}_{model_type}"
+        
+        # Check cache first
+        if cache_key in self.models_cache:
+            return (self.models_cache[cache_key], 
+                   self.scalers_cache.get(cache_key),
+                   self.features_cache.get(cache_key))
+        
+        try:
+            # Load model (try ensemble models: lightgbm, xgboost, catboost)
+            models = {}
+            for model_name in ['lightgbm', 'xgboost', 'catboost']:
+                model_path = f"{self.models_dir}/{safe_symbol}_{timeframe}_{model_type}_{model_name}.joblib"
+                if os.path.exists(model_path):
+                    models[model_name] = self.joblib.load(model_path)
+            
+            if not models:
+                return None, None, None
+            
+            # Load scaler
+            scaler_path = f"{self.models_dir}/{safe_symbol}_{timeframe}_{model_type}_scaler.joblib"
+            scaler = self.joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+            
+            # Load feature list
+            features_path = f"{self.models_dir}/{safe_symbol}_{timeframe}_{model_type}_features.joblib"
+            features = self.joblib.load(features_path) if os.path.exists(features_path) else None
+            
+            # Cache the loaded components
+            self.models_cache[cache_key] = models
+            if scaler:
+                self.scalers_cache[cache_key] = scaler
+            if features:
+                self.features_cache[cache_key] = features
+            
+            return models, scaler, features
+            
+        except Exception as e:
+            logging.warning(f"⚠️ Could not load model components for {cache_key}: {e}")
+            return None, None, None
+    
+    def predict(self, symbol: str, timeframe: str, df: pd.DataFrame) -> Dict:
         """
-        if not self.models_loaded:
-            # Return neutral placeholder predictions
+        Make ML predictions using trained ensemble models
+        
+        Args:
+            symbol: Trading symbol (e.g., 'BTC/USDT')
+            timeframe: Timeframe (e.g., '1h', '4h')
+            df: DataFrame with OHLCV data
+            
+        Returns:
+            Dictionary with ML predictions
+        """
+        if not self.joblib_available or not self.models_available:
             return {
                 'ml_available': False,
                 'price_change_prediction': 0.0,
                 'direction_prediction': 'NEUTRAL',
                 'direction_probability': 0.5,
                 'confidence': 0.0,
-                'note': 'ML models not yet trained'
+                'note': 'ML models not available'
             }
         
-        # TODO: When models are trained, load and use them here
-        # For now, return neutral
-        return {
-            'ml_available': True,
-            'price_change_prediction': 0.0,
-            'direction_prediction': 'NEUTRAL',
-            'direction_probability': 0.5,
-            'confidence': 0.0,
-            'note': 'ML prediction placeholder'
-        }
+        if df is None or df.empty or len(df) < 60:
+            return {
+                'ml_available': False,
+                'price_change_prediction': 0.0,
+                'direction_prediction': 'NEUTRAL',
+                'direction_probability': 0.5,
+                'confidence': 0.0,
+                'note': 'Insufficient data for ML prediction'
+            }
+        
+        try:
+            # Create features
+            df_features = self._create_features(df)
+            if df_features.empty:
+                raise ValueError("Failed to create features")
+            
+            # Get predictions from both price and direction models
+            price_pred = self._predict_price(symbol, timeframe, df_features)
+            direction_pred = self._predict_direction(symbol, timeframe, df_features)
+            
+            # Combine predictions
+            if price_pred or direction_pred:
+                # Use price prediction as primary
+                if price_pred:
+                    price_change = price_pred['price_change']
+                    confidence = price_pred['confidence']
+                else:
+                    price_change = 0.0
+                    confidence = 0.0
+                
+                # Use direction prediction
+                if direction_pred:
+                    direction = direction_pred['direction']
+                    direction_prob = direction_pred['probability']
+                    if confidence == 0:
+                        confidence = direction_prob
+                else:
+                    direction = 'UP' if price_change > 0 else 'DOWN' if price_change < 0 else 'NEUTRAL'
+                    direction_prob = abs(price_change) if price_change != 0 else 0.5
+                
+                return {
+                    'ml_available': True,
+                    'price_change_prediction': float(price_change),
+                    'direction_prediction': direction,
+                    'direction_probability': float(direction_prob),
+                    'confidence': float(confidence),
+                    'note': f'Ensemble prediction from {len(price_pred.get("models_used", []))} models'
+                }
+            else:
+                # No models available for this symbol/timeframe
+                return {
+                    'ml_available': False,
+                    'price_change_prediction': 0.0,
+                    'direction_prediction': 'NEUTRAL',
+                    'direction_probability': 0.5,
+                    'confidence': 0.0,
+                    'note': f'No trained models for {symbol} {timeframe}'
+                }
+                
+        except Exception as e:
+            logging.error(f"❌ ML prediction error for {symbol} {timeframe}: {e}")
+            return {
+                'ml_available': False,
+                'price_change_prediction': 0.0,
+                'direction_prediction': 'NEUTRAL',
+                'direction_probability': 0.5,
+                'confidence': 0.0,
+                'note': f'Prediction error: {str(e)}'
+            }
+    
+    def _predict_price(self, symbol: str, timeframe: str, df_features: pd.DataFrame) -> Optional[Dict]:
+        """Predict price change using ensemble of regression models"""
+        models, scaler, feature_cols = self._load_model_components(symbol, timeframe, 'price')
+        
+        if not models or scaler is None or feature_cols is None:
+            return None
+        
+        try:
+            # Prepare features
+            available_features = [col for col in feature_cols if col in df_features.columns]
+            if not available_features:
+                return None
+            
+            X_latest = df_features[available_features].iloc[-1:].values
+            X_scaled = scaler.transform(X_latest)
+            
+            # Get predictions from all models
+            predictions = []
+            weights = {
+                'lightgbm': 0.50,
+                'xgboost': 0.30,
+                'catboost': 0.20
+            }
+            
+            models_used = []
+            for model_name, model in models.items():
+                pred = model.predict(X_scaled)[0]
+                predictions.append(pred * weights.get(model_name, 0.33))
+                models_used.append(model_name)
+            
+            # Ensemble prediction (weighted average)
+            ensemble_pred = sum(predictions)
+            
+            # Calculate confidence (inverse of prediction variance)
+            if len(predictions) > 1:
+                pred_std = np.std(predictions)
+                confidence = max(0.0, min(1.0, 1.0 - pred_std * 10))  # Scale std to 0-1
+            else:
+                confidence = 0.7  # Default confidence for single model
+            
+            return {
+                'price_change': ensemble_pred,
+                'confidence': confidence,
+                'models_used': models_used
+            }
+            
+        except Exception as e:
+            logging.warning(f"⚠️ Price prediction error: {e}")
+            return None
+    
+    def _predict_direction(self, symbol: str, timeframe: str, df_features: pd.DataFrame) -> Optional[Dict]:
+        """Predict direction using ensemble of classification models"""
+        models, scaler, feature_cols = self._load_model_components(symbol, timeframe, 'direction')
+        
+        if not models or scaler is None or feature_cols is None:
+            return None
+        
+        try:
+            # Prepare features
+            available_features = [col for col in feature_cols if col in df_features.columns]
+            if not available_features:
+                return None
+            
+            X_latest = df_features[available_features].iloc[-1:].values
+            X_scaled = scaler.transform(X_latest)
+            
+            # Get predictions from all models
+            up_votes = 0
+            down_votes = 0
+            
+            for model_name, model in models.items():
+                pred = model.predict(X_scaled)[0]
+                if pred == 1:
+                    up_votes += 1
+                else:
+                    down_votes += 1
+            
+            # Determine direction and probability
+            total_votes = up_votes + down_votes
+            if up_votes > down_votes:
+                direction = 'UP'
+                probability = up_votes / total_votes
+            elif down_votes > up_votes:
+                direction = 'DOWN'
+                probability = down_votes / total_votes
+            else:
+                direction = 'NEUTRAL'
+                probability = 0.5
+            
+            return {
+                'direction': direction,
+                'probability': probability
+            }
+            
+        except Exception as e:
+            logging.warning(f"⚠️ Direction prediction error: {e}")
+            return None
 
 
 class UnifiedAnalyzer:
@@ -811,6 +1129,10 @@ class UnifiedAnalyzer:
                 tf_conf = tf_result['combined']['confidence']
                 weight = self.timeframe_weights.get(tf, 0)
                 
+                # Show ML contribution
+                ml_available = tf_result['ml_predictions']['ml_available']
+                ml_note = "🤖 ML" if ml_available else "📊 TA"
+                
                 tf_emoji = {
                     'STRONG_BUY': '🟢🟢',
                     'BUY': '🟢',
@@ -822,7 +1144,7 @@ class UnifiedAnalyzer:
                 print(f"      {tf:>3}: {tf_emoji} {tf_signal:12} "
                       f"Score: {tf_score:5.1f} "
                       f"Conf: {tf_conf:5.1f}% "
-                      f"(Weight: {weight:2d}%)")
+                      f"(Weight: {weight:2d}%) {ml_note}")
         
         # Market summary
         self._display_market_summary(results)

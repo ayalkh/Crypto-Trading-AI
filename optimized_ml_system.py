@@ -920,7 +920,7 @@ def main():
     
     # Symbols and timeframes
     symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
-    timeframes = ['1h', '4h']  # Focus on best performing timeframes
+    timeframes = ['5m', '15m', '1h', '4h', '1d']
     
     print("\n📋 Training Plan:")
     print(f"   Symbols: {', '.join(symbols)}")
