@@ -9,16 +9,17 @@ Features:
 - Multi-timeframe synchronization
 - Data quality validation
 """
-import os
-import sys
-import ccxt
-import pandas as pd
-import numpy as np
-import sqlite3
 from datetime import datetime, timedelta
-import time
 import logging
+import os
+import sqlite3
+import sys
+import time
 from typing import Dict, List, Tuple
+
+import ccxt
+import numpy as np
+import pandas as pd
 
 # Setup logging
 logging.basicConfig(
@@ -36,7 +37,7 @@ class ComprehensiveMLDataCollector:
     Collect comprehensive historical data optimized for ML models
     """
     
-    def __init__(self, db_path='data/ml_crypto_data.db'):
+    def __init__(self, db_path='data/ml_comprehensive_data.db'):
         """Initialize comprehensive data collector"""
         self.db_path = db_path
         self.exchange = ccxt.binance()
@@ -255,19 +256,20 @@ class ComprehensiveMLDataCollector:
     
     def save_to_database(self, df: pd.DataFrame) -> int:
         """
-        Save DataFrame to database
+        Save DataFrame to database with duplicate handling (skip duplicates)
         
         Args:
             df: DataFrame with OHLCV data
         
         Returns:
-            Number of records saved
+            Number of NEW records saved
         """
         if df.empty:
             return 0
         
         try:
             conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
             # Prepare data
             df_save = df[[
@@ -276,25 +278,51 @@ class ComprehensiveMLDataCollector:
                 'price_change_pct'
             ]].copy()
             
+            # Convert timestamp to string format for SQLite
+            df_save['timestamp'] = df_save['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
             df_save['data_quality'] = 'COMPLETE'
             
-            # Insert with conflict handling
-            records_before = self._get_record_count(
-                conn, df['symbol'].iloc[0], df['timeframe'].iloc[0]
-            )
+            # Get count before insertion
+            symbol = df['symbol'].iloc[0]
+            timeframe = df['timeframe'].iloc[0]
+            records_before = self._get_record_count(conn, symbol, timeframe)
             
-            df_save.to_sql('price_data', conn, if_exists='append', index=False)
+            # Batch insert with INSERT OR IGNORE (skips duplicates)
+            records_data = []
+            for _, row in df_save.iterrows():
+                records_data.append((
+                    row['symbol'], 
+                    row['timeframe'], 
+                    row['timestamp'],  # Now a string
+                    float(row['open']), 
+                    float(row['high']), 
+                    float(row['low']), 
+                    float(row['close']),
+                    float(row['volume']), 
+                    float(row['price_change_pct']) if pd.notna(row['price_change_pct']) else None,
+                    'COMPLETE'
+                ))
             
-            records_after = self._get_record_count(
-                conn, df['symbol'].iloc[0], df['timeframe'].iloc[0]
-            )
-            
-            records_saved = records_after - records_before
+            cursor.executemany('''
+                INSERT OR IGNORE INTO price_data 
+                (symbol, timeframe, timestamp, open, high, low, close, volume, 
+                price_change_pct, data_quality)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', records_data)
             
             conn.commit()
+            
+            # Get count after insertion
+            records_after = self._get_record_count(conn, symbol, timeframe)
+            records_saved = records_after - records_before
+            
             conn.close()
             
-            logging.info(f"💾 Saved {records_saved} new records to database")
+            if records_saved > 0:
+                logging.info(f"💾 Saved {records_saved} new records (skipped {len(df_save) - records_saved} duplicates)")
+            else:
+                logging.info(f"💾 No new records (all {len(df_save)} already exist)")
             
             return records_saved
             

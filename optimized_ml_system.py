@@ -3,6 +3,7 @@ Optimized ML/DL Integration System for Crypto Trading
 Implementation: LightGBM + XGBoost + CatBoost + GRU Ensemble
 Database: ml_crypto_data.db (unified database)
 Strategy: Best practices for crypto price prediction
+Enhanced with dual logging (console + file)
 """
 import os
 import sys
@@ -29,12 +30,8 @@ from datetime import datetime
 import logging
 from typing import Dict, List, Tuple, Optional
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%H:%M:%S'
-)
+# Note: Logging will be configured in OptimizedCryptoMLSystem.__init__
+# to support dual output (console + file)
 
 # ML Libraries
 try:
@@ -44,28 +41,28 @@ try:
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
-    logging.error("❌ Scikit-learn not available. Install: pip install scikit-learn")
+    print("❌ Scikit-learn not available. Install: pip install scikit-learn")
 
 try:
     import lightgbm as lgb
     LIGHTGBM_AVAILABLE = True
 except ImportError:
     LIGHTGBM_AVAILABLE = False
-    logging.warning("⚠️ LightGBM not available. Install: pip install lightgbm")
+    print("⚠️ LightGBM not available. Install: pip install lightgbm")
 
 try:
     import xgboost as xgb
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-    logging.warning("⚠️ XGBoost not available. Install: pip install xgboost")
+    print("⚠️ XGBoost not available. Install: pip install xgboost")
 
 try:
     import catboost as cb
     CATBOOST_AVAILABLE = True
 except ImportError:
     CATBOOST_AVAILABLE = False
-    logging.warning("⚠️ CatBoost not available. Install: pip install catboost")
+    print("⚠️ CatBoost not available. Install: pip install catboost")
 
 try:
     import tensorflow as tf
@@ -76,7 +73,7 @@ try:
     DL_AVAILABLE = True
 except ImportError:
     DL_AVAILABLE = False
-    logging.warning("⚠️ TensorFlow not available. Install: pip install tensorflow")
+    print("⚠️ TensorFlow not available. Install: pip install tensorflow")
 
 
 class OptimizedCryptoMLSystem:
@@ -99,13 +96,51 @@ class OptimizedCryptoMLSystem:
         os.makedirs('ml_models', exist_ok=True)
         os.makedirs('ml_predictions', exist_ok=True)
         os.makedirs('ml_reports', exist_ok=True)
+        os.makedirs('logs', exist_ok=True)  # For log files
+        
+        # Setup dual logging (console + file)
+        self.log_file = self._setup_logging()
         
         logging.info("🧠 Optimized Crypto ML System initialized")
         logging.info(f"📁 Database: {self.db_path}")
+        logging.info(f"📝 Log file: {self.log_file}")
         logging.info(f"✅ LightGBM: {LIGHTGBM_AVAILABLE}")
         logging.info(f"✅ XGBoost: {XGBOOST_AVAILABLE}")
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
         logging.info(f"✅ TensorFlow: {DL_AVAILABLE}")
+    
+    def _setup_logging(self):
+        """Setup logging to both console and file"""
+        # Create timestamped log file
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_file = f'logs/ml_training_{timestamp}.log'
+        
+        # Remove existing handlers to avoid duplicates
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        
+        # Create formatters
+        formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # File handler (captures everything)
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        
+        # Console handler (for screen output)
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        
+        # Add handlers to root logger
+        logging.root.addHandler(file_handler)
+        logging.root.addHandler(console_handler)
+        logging.root.setLevel(logging.DEBUG)
+        
+        return log_file
     
     def load_data(self, symbol: str, timeframe: str, months_back: int = None) -> pd.DataFrame:
         """
@@ -930,6 +965,11 @@ def main():
     
     input("Press ENTER to start training... ")
     
+    # Track progress
+    total_trained = 0
+    total_failed = 0
+    start_time = datetime.now()
+    
     # Training loop
     for symbol in symbols:
         for timeframe in timeframes:
@@ -940,6 +980,7 @@ def main():
             success = ml_system.train_ensemble(symbol, timeframe)
             
             if success:
+                total_trained += 1
                 print(f"\n✅ Training completed for {symbol} {timeframe}")
                 
                 # Make a test prediction
@@ -955,14 +996,24 @@ def main():
                     if 'direction' in prediction:
                         print(f"   Direction: {prediction['direction']} ({prediction['direction_confidence']:.0%} confidence)")
             else:
+                total_failed += 1
                 print(f"\n❌ Training failed for {symbol} {timeframe}")
             
             print("\n" + "-"*70)
     
+    # Final summary
+    duration = datetime.now() - start_time
+    
     print("\n" + "="*70)
     print("🎉 TRAINING COMPLETE!")
     print("="*70)
-    print("\n📁 Models saved in: ml_models/")
+    print(f"\n📊 Summary:")
+    print(f"   Total Successful: {total_trained}")
+    print(f"   Total Failed: {total_failed}")
+    print(f"   Success Rate: {total_trained/(total_trained+total_failed)*100:.1f}%")
+    print(f"   Duration: {duration}")
+    print(f"\n📁 Models saved in: ml_models/")
+    print(f"📝 Logs saved in: {ml_system.log_file}")
     print("💡 Next step: Integrate predictions into unified_crypto_analyzer.py")
     print("\n")
 

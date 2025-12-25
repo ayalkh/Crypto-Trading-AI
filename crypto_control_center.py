@@ -243,7 +243,7 @@ class CryptoControlCenter:
 
     def _run_collector(self, args):
         """Run the unified ML collector"""
-        cmd = [sys.executable, 'unified_ml_collector.py'] + args
+        cmd = [sys.executable, 'comprehensive_ml_collector.py'] + args
         
         try:
             print(f"⚙️ Running: {' '.join(cmd)}")
@@ -1068,7 +1068,7 @@ class CryptoControlCenter:
 
     def _test_collector(self):
         """Test collector script"""
-        return os.path.exists('unified_ml_collector.py')
+        return os.path.exists('comprehensive_ml_collector.py')
 
     def _test_analyzer(self):
         """Test analyzer script"""
@@ -1172,7 +1172,7 @@ def main():
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
         
-        if not os.path.exists('unified_ml_collector.py'):
+        if not os.path.exists('comprehensive_ml_collector.py'):
             print("⚠️ Warning: Core system files not found")
             print("💡 Make sure you're in the right directory")
             print()
