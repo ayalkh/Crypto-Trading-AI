@@ -104,11 +104,6 @@ class OptimizedCryptoMLSystem:
         logging.info("🧠 Optimized Crypto ML System initialized")
         logging.info(f"📁 Database: {self.db_path}")
         logging.info(f"📝 Log file: {self.log_file}")
-        logging.info("✨ Priority 1 ML fixes applied:")
-        logging.info("   • Adaptive lookback: 1d=6mo, 4h=3mo, 1h=2mo")
-        logging.info("   • Prediction clipping enabled by timeframe")
-        logging.info("   • GRU weight optimized: 25% → 10%")
-        logging.info("   • Improved confidence calculation")
         logging.info(f"✅ LightGBM: {LIGHTGBM_AVAILABLE}")
         logging.info(f"✅ XGBoost: {XGBOOST_AVAILABLE}")
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
@@ -778,23 +773,16 @@ class OptimizedCryptoMLSystem:
         """
         Make ensemble predictions combining all models
         
-        Weights by timeframe (OPTIMIZED - Priority 1):
+        Weights by timeframe:
         - 1h: 50% LightGBM, 30% XGBoost, 20% CatBoost
-        - 4h: 45% LightGBM, 30% XGBoost, 15% CatBoost, 10% GRU
+        - 4h: 35% LightGBM, 25% XGBoost, 15% CatBoost, 25% GRU
         """
         logging.info(f"\n{'='*60}")
         logging.info(f"🔮 Ensemble Prediction: {symbol} {timeframe}")
         logging.info(f"{'='*60}\n")
         
-        # PRIORITY 1 FIX: Adaptive lookback based on timeframe
-        lookback_map = {
-            '5m': 1, '15m': 1, '1h': 2, '4h': 3, '1d': 6
-        }
-        months_back = lookback_map.get(timeframe, 1)
-        logging.info(f"📅 Using {months_back} months lookback for {timeframe}")
-        
-        # Load recent data with appropriate lookback
-        df = self.load_data(symbol, timeframe, months_back=months_back)
+        # Load recent data
+        df = self.load_data(symbol, timeframe, months_back=1)
         if df.empty or len(df) < 50:
             logging.error("❌ Insufficient data for prediction")
             return {}
@@ -825,12 +813,6 @@ class OptimizedCryptoMLSystem:
         
         X_latest = df_features[available_features].iloc[-1:].values
         
-        # PRIORITY 1 FIX: Optimized ensemble weights
-        if timeframe == '4h':
-            weight_config = {'lightgbm': 0.45, 'xgboost': 0.30, 'catboost': 0.15, 'gru': 0.10}
-        else:
-            weight_config = {'lightgbm': 0.50, 'xgboost': 0.30, 'catboost': 0.20}
-        
         # Price predictions
         price_preds = []
         price_weights = []
@@ -842,8 +824,8 @@ class OptimizedCryptoMLSystem:
                 X_scaled = scaler.transform(X_latest)
                 pred = self.models[f"{symbol}_{timeframe}_price_lightgbm"].predict(X_scaled)[0]
                 price_preds.append(pred)
-                price_weights.append(weight_config['lightgbm'])
-                logging.info(f"📊 LightGBM price: {pred:+.4%} (weight: {weight_config['lightgbm']:.0%})")
+                price_weights.append(0.50 if timeframe != '4h' else 0.35)
+                logging.info(f"📊 LightGBM price: {pred:+.4%}")
         
         # XGBoost
         if f"{symbol}_{timeframe}_price_xgboost" in self.models:
@@ -852,18 +834,18 @@ class OptimizedCryptoMLSystem:
                 X_scaled = scaler.transform(X_latest)
                 pred = self.models[f"{symbol}_{timeframe}_price_xgboost"].predict(X_scaled)[0]
                 price_preds.append(pred)
-                price_weights.append(weight_config['xgboost'])
-                logging.info(f"📊 XGBoost price: {pred:+.4%} (weight: {weight_config['xgboost']:.0%})")
+                price_weights.append(0.30 if timeframe != '4h' else 0.25)
+                logging.info(f"📊 XGBoost price: {pred:+.4%}")
         
-        # CatBoost
+        # CatBoost (uses scaled data like LightGBM/XGBoost)
         if f"{symbol}_{timeframe}_price_catboost" in self.models:
             scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
             if scaler is not None:
                 X_scaled = scaler.transform(X_latest)
                 pred = self.models[f"{symbol}_{timeframe}_price_catboost"].predict(X_scaled)[0]
                 price_preds.append(pred)
-                price_weights.append(weight_config['catboost'])
-                logging.info(f"📊 CatBoost price: {pred:+.4%} (weight: {weight_config['catboost']:.0%})")
+                price_weights.append(0.20 if timeframe != '4h' else 0.15)
+                logging.info(f"📊 CatBoost price: {pred:+.4%}")
         
         # GRU (4h only)
         if timeframe == '4h' and f"{symbol}_{timeframe}_gru" in self.models:
@@ -881,8 +863,8 @@ class OptimizedCryptoMLSystem:
                         gru_pred_change = gru_pred_price / df['close'].iloc[-1] - 1
                         
                         price_preds.append(gru_pred_change)
-                        price_weights.append(weight_config.get('gru', 0.10))
-                        logging.info(f"🧠 GRU price: {gru_pred_change:+.4%} (weight: {weight_config.get('gru', 0.10):.0%})")
+                        price_weights.append(0.25)
+                        logging.info(f"🧠 GRU price: {gru_pred_change:+.4%}")
                     except Exception as e:
                         logging.warning(f"⚠️ GRU prediction failed: {e}")
         
@@ -893,28 +875,12 @@ class OptimizedCryptoMLSystem:
             normalized_weights = [w/total_weight for w in price_weights]
             
             ensemble_price_change = sum(p * w for p, w in zip(price_preds, normalized_weights))
-            
-            # PRIORITY 1 FIX: Clip unrealistic predictions
-            prediction_limits = {
-                '5m': 0.02, '15m': 0.03, '1h': 0.05, '4h': 0.10, '1d': 0.15
-            }
-            max_change = prediction_limits.get(timeframe, 0.05)
-            original_pred = ensemble_price_change
-            ensemble_price_change = np.clip(ensemble_price_change, -max_change, max_change)
-            
-            if abs(original_pred) != abs(ensemble_price_change):
-                logging.warning(f"⚠️ Clipped prediction from {original_pred:+.4%} to {ensemble_price_change:+.4%}")
-            
             predictions['price_change_pct'] = float(ensemble_price_change * 100)
             predictions['predicted_price'] = float(df['close'].iloc[-1] * (1 + ensemble_price_change))
-            
-            # Use improved confidence calculation
-            direction_votes_for_conf = direction_votes if 'direction_votes' in locals() else {'UP': 0, 'DOWN': 0}
-            predictions['confidence'] = self.calculate_confidence(price_preds, direction_votes_for_conf)
+            predictions['confidence'] = float(min(0.95, 1.0 - np.std(price_preds)))
             
             logging.info(f"\n💡 Ensemble Price Change: {ensemble_price_change:+.4%}")
             logging.info(f"💰 Predicted Price: ${predictions['predicted_price']:.2f}")
-            logging.info(f"📊 Confidence: {predictions['confidence']:.2%}")
         
         # Direction predictions
         direction_votes = {'UP': 0, 'DOWN': 0}
@@ -937,39 +903,6 @@ class OptimizedCryptoMLSystem:
         
         logging.info(f"\n✅ Ensemble prediction complete!\n")
         return predictions
-    
-    def calculate_confidence(self, price_preds: list, direction_votes: dict) -> float:
-        """
-        Calculate prediction confidence based on model agreement
-        
-        PRIORITY 1 FIX: Improved confidence scoring
-        
-        Args:
-            price_preds: List of price predictions from models
-            direction_votes: Dictionary of direction votes
-        
-        Returns:
-            Confidence score between 0 and 0.95
-        """
-        # Direction agreement component
-        total_votes = sum(direction_votes.values())
-        if total_votes == 0:
-            direction_confidence = 0.5
-        else:
-            max_votes = max(direction_votes.values())
-            direction_confidence = max_votes / total_votes
-        
-        # Price prediction variance component
-        if len(price_preds) > 0:
-            std = np.std(price_preds)
-            variance_confidence = 1.0 / (1.0 + std * 100)
-        else:
-            variance_confidence = 0.5
-        
-        # Combined confidence (70% direction, 30% variance)
-        confidence = (direction_confidence * 0.7 + variance_confidence * 0.3)
-        
-        return float(np.clip(confidence, 0.0, 0.95))
     
     def _load_models(self, symbol: str, timeframe: str):
         """Load all available models for a symbol/timeframe"""

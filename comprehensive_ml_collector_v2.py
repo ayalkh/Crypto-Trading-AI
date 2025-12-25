@@ -1,6 +1,12 @@
 """
-Comprehensive ML-Optimized Data Collector
-Collects extended historical data for LSTM/GRU and advanced ML models
+Comprehensive ML-Optimized Data Collector V2
+Updated based on ML training analysis and Priority 1 fixes
+
+Key Improvements:
+- Aligned with prediction lookback requirements (6 months for 1d)
+- Optimized timeframe configurations
+- Better data quality validation
+- ML readiness assessment based on actual needs
 
 Features:
 - 3-6 months historical data collection
@@ -35,9 +41,10 @@ logging.basicConfig(
 class ComprehensiveMLDataCollector:
     """
     Collect comprehensive historical data optimized for ML models
+    V2 - Updated based on ML analysis results
     """
     
-    def __init__(self, db_path='data/ml_comprehensive_data.db'):
+    def __init__(self, db_path='data/ml_crypto_data.db'):
         """Initialize comprehensive data collector"""
         self.db_path = db_path
         self.exchange = ccxt.binance()
@@ -51,13 +58,50 @@ class ComprehensiveMLDataCollector:
             'DOT/USDT'
         ]
         
-        # Comprehensive timeframe configuration
+        # Optimized timeframe configuration based on ML analysis
+        # Updated to ensure sufficient data for both training AND predictions
         self.timeframes = {
-            '5m':  {'months_back': 1,  'ml_samples': 8640},   # 1 month = 8,640 5-min candles
-            '15m': {'months_back': 2,  'ml_samples': 5760},   # 2 months = 5,760 15-min candles
-            '1h':  {'months_back': 6,  'ml_samples': 4320},   # 6 months = 4,320 hourly candles
-            '4h':  {'months_back': 12, 'ml_samples': 2190},   # 12 months = 2,190 4-hour candles
-            '1d':  {'months_back': 24, 'ml_samples': 730}     # 24 months = 730 daily candles
+            # Format: 'timeframe': {training_months, prediction_months, expected_samples, min_required}
+            '5m':  {
+                'training_months': 1,      # For model training
+                'prediction_months': 1,    # For making predictions
+                'ml_samples': 8640,        # Expected training samples
+                'min_for_training': 1000,  # Minimum needed to train
+                'min_for_prediction': 100, # Minimum needed to predict
+                'priority': 'LOW'          # Analysis shows 5m is too noisy
+            },
+            '15m': {
+                'training_months': 2,
+                'prediction_months': 1,
+                'ml_samples': 5760,
+                'min_for_training': 1000,
+                'min_for_prediction': 100,
+                'priority': 'MEDIUM'
+            },
+            '1h':  {
+                'training_months': 6,
+                'prediction_months': 2,    # PRIORITY 1 FIX: increased from 1
+                'ml_samples': 4320,
+                'min_for_training': 2000,
+                'min_for_prediction': 150,
+                'priority': 'HIGH'         # Best timeframe per analysis
+            },
+            '4h':  {
+                'training_months': 12,
+                'prediction_months': 3,    # PRIORITY 1 FIX: increased from 1
+                'ml_samples': 2190,
+                'min_for_training': 1000,
+                'min_for_prediction': 150,
+                'priority': 'HIGH'         # Strong signals with GRU
+            },
+            '1d':  {
+                'training_months': 24,
+                'prediction_months': 6,    # PRIORITY 1 FIX: CRITICAL - was 1, now 6!
+                'ml_samples': 730,
+                'min_for_training': 500,
+                'min_for_prediction': 180, # 6 months minimum for predictions
+                'priority': 'MEDIUM'       # Good signals but needs more data
+            }
         }
         
         # Create database directory
@@ -66,53 +110,19 @@ class ComprehensiveMLDataCollector:
         # Initialize enhanced database
         self.init_enhanced_database()
         
-        logging.info("🧠 Comprehensive ML Data Collector initialized")
+        logging.info("🧠 Comprehensive ML Data Collector V2 initialized")
         logging.info(f"📊 Target: {sum(config['ml_samples'] for config in self.timeframes.values())} total candles per symbol")
+        logging.info("✨ Updated with Priority 1 ML fixes")
     
     def init_enhanced_database(self):
         """Initialize database with enhanced ML schema"""
         logging.info("🗄️ Initializing enhanced ML database...")
         
-        # Read and execute schema
-        schema_path = 'enhanced_ml_database_schema.sql'
-        
-        if not os.path.exists(schema_path):
-            logging.warning("⚠️ Schema file not found, creating basic schema")
-            self._create_basic_schema()
-            return
-        
-        try:
-            with open(schema_path, 'r') as f:
-                schema_sql = f.read()
-            
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Execute schema (split by ; and execute each statement)
-            for statement in schema_sql.split(';'):
-                if statement.strip():
-                    try:
-                        cursor.execute(statement)
-                    except Exception as e:
-                        # Skip view creations and other non-critical errors
-                        if 'VIEW' not in statement.upper():
-                            logging.warning(f"Schema warning: {e}")
-            
-            conn.commit()
-            conn.close()
-            
-            logging.info("✅ Enhanced database schema created")
-            
-        except Exception as e:
-            logging.error(f"❌ Error creating schema: {e}")
-            self._create_basic_schema()
-    
-    def _create_basic_schema(self):
-        """Create basic schema if full schema fails"""
+        # Create basic schema (compatible with your existing system)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Just create the essential price_data table
+        # Main price data table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS price_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,11 +141,13 @@ class ComprehensiveMLDataCollector:
             )
         ''')
         
+        # Optimized index
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_symbol_timeframe_timestamp 
             ON price_data(symbol, timeframe, timestamp DESC)
         ''')
         
+        # Collection status tracking
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS collection_status (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,13 +159,15 @@ class ComprehensiveMLDataCollector:
                 earliest_timestamp DATETIME,
                 latest_timestamp DATETIME,
                 completeness_pct REAL,
+                training_ready BOOLEAN DEFAULT 0,
+                prediction_ready BOOLEAN DEFAULT 0,
                 UNIQUE(symbol, timeframe)
             )
         ''')
         
         conn.commit()
         conn.close()
-        logging.info("✅ Basic database schema created")
+        logging.info("✅ Enhanced database schema created")
     
     def collect_historical_data(self, symbol: str, timeframe: str, 
                                 months_back: int) -> pd.DataFrame:
@@ -340,7 +354,7 @@ class ComprehensiveMLDataCollector:
         return cursor.fetchone()[0]
     
     def update_collection_status(self, symbol: str, timeframe: str):
-        """Update collection status table"""
+        """Update collection status table with ML readiness flags"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -359,23 +373,45 @@ class ComprehensiveMLDataCollector:
             count, earliest, latest = result
             
             if count > 0:
+                config = self.timeframes[timeframe]
+                
                 # Calculate completeness
-                expected_records = self.timeframes[timeframe]['ml_samples']
+                expected_records = config['ml_samples']
                 completeness = min((count / expected_records) * 100, 100)
+                
+                # Check ML readiness
+                training_ready = count >= config['min_for_training']
+                prediction_ready = count >= config['min_for_prediction']
                 
                 # Update status
                 cursor.execute("""
                     INSERT OR REPLACE INTO collection_status 
                     (symbol, timeframe, last_update, records_count, status, 
-                     earliest_timestamp, latest_timestamp, completeness_pct)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     earliest_timestamp, latest_timestamp, completeness_pct,
+                     training_ready, prediction_ready)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     symbol, timeframe, datetime.now(), count, 'COMPLETE',
-                    earliest, latest, completeness
+                    earliest, latest, completeness, training_ready, prediction_ready
                 ))
                 
                 conn.commit()
-                logging.info(f"📊 Status updated: {count} records ({completeness:.1f}% complete)")
+                
+                # Log ML readiness
+                status_msg = []
+                if training_ready:
+                    status_msg.append("✅ Training ready")
+                else:
+                    needed = config['min_for_training'] - count
+                    status_msg.append(f"⚠️ Training needs {needed} more")
+                
+                if prediction_ready:
+                    status_msg.append("✅ Prediction ready")
+                else:
+                    needed = config['min_for_prediction'] - count
+                    status_msg.append(f"⚠️ Prediction needs {needed} more")
+                
+                logging.info(f"📊 Status: {count} records ({completeness:.1f}%) - {' | '.join(status_msg)}")
             
             conn.close()
             
@@ -385,10 +421,16 @@ class ComprehensiveMLDataCollector:
     def collect_all_comprehensive_data(self):
         """
         Main method to collect all comprehensive data for ML
+        Now uses TRAINING months for collection
         """
         start_time = datetime.now()
         
-        logging.info("🚀 STARTING COMPREHENSIVE DATA COLLECTION FOR ML")
+        logging.info("🚀 STARTING COMPREHENSIVE DATA COLLECTION FOR ML V2")
+        logging.info("=" * 70)
+        logging.info("✨ Priority 1 optimizations applied:")
+        logging.info("   • 1h prediction: 2 months lookback")
+        logging.info("   • 4h prediction: 3 months lookback")
+        logging.info("   • 1d prediction: 6 months lookback (CRITICAL FIX)")
         logging.info("=" * 70)
         
         total_symbols = len(self.symbols)
@@ -404,14 +446,17 @@ class ComprehensiveMLDataCollector:
             logging.info(f"{'='*70}")
             
             for tf_idx, (timeframe, config) in enumerate(self.timeframes.items(), 1):
-                logging.info(f"\n⏱️  Timeframe {tf_idx}/{total_timeframes}: {timeframe}")
-                logging.info(f"   Target: {config['ml_samples']} candles ({config['months_back']} months)")
+                priority_emoji = {"HIGH": "⭐", "MEDIUM": "🔵", "LOW": "⚪"}[config['priority']]
                 
-                # Collect historical data
+                logging.info(f"\n⏱️  Timeframe {tf_idx}/{total_timeframes}: {timeframe} {priority_emoji} {config['priority']}")
+                logging.info(f"   Training: {config['ml_samples']} candles ({config['training_months']} months)")
+                logging.info(f"   Prediction: {config['prediction_months']} months minimum")
+                
+                # Collect historical data (use training_months)
                 df = self.collect_historical_data(
                     symbol, 
                     timeframe, 
-                    config['months_back']
+                    config['training_months']
                 )
                 
                 if not df.empty:
@@ -419,7 +464,7 @@ class ComprehensiveMLDataCollector:
                     records_saved = self.save_to_database(df)
                     total_records += records_saved
                     
-                    # Update status
+                    # Update status with ML readiness
                     self.update_collection_status(symbol, timeframe)
                     
                     completed += 1
@@ -446,18 +491,19 @@ class ComprehensiveMLDataCollector:
         logging.info("🎉 COMPREHENSIVE DATA COLLECTION COMPLETE!")
         logging.info("="*70)
         logging.info(f"✅ Completed: {completed}/{total_collections} collections")
-        logging.info(f"💾 Total records: {total_records:,}")
+        logging.info(f"💾 Total new records: {total_records:,}")
         logging.info(f"⏱️  Duration: {duration/60:.1f} minutes")
-        logging.info(f"📊 Average: {total_records/duration:.1f} records/second")
+        if total_records > 0:
+            logging.info(f"📊 Average: {total_records/duration:.1f} records/second")
         logging.info("="*70)
         
         # Display final status
         self.display_database_status()
     
     def display_database_status(self):
-        """Display comprehensive database status"""
+        """Display comprehensive database status with ML readiness"""
         logging.info("\n📊 FINAL DATABASE STATUS")
-        logging.info("="*90)
+        logging.info("="*110)
         
         try:
             conn = sqlite3.connect(self.db_path)
@@ -470,6 +516,8 @@ class ComprehensiveMLDataCollector:
                     earliest_timestamp,
                     latest_timestamp,
                     completeness_pct,
+                    training_ready,
+                    prediction_ready,
                     status
                 FROM collection_status
                 ORDER BY symbol, timeframe
@@ -483,10 +531,12 @@ class ComprehensiveMLDataCollector:
                 return
             
             # Display table
-            logging.info(f"{'Symbol':<12} {'TF':<6} {'Records':<10} {'Earliest':<20} {'Latest':<20} {'Complete':<10} {'Status'}")
-            logging.info("-"*90)
+            logging.info(f"{'Symbol':<12} {'TF':<6} {'Records':<10} {'Earliest':<20} {'Latest':<20} {'Complete':<10} {'Train':<7} {'Predict':<8}")
+            logging.info("-"*110)
             
             total_records = 0
+            training_ready_count = 0
+            prediction_ready_count = 0
             
             for _, row in df.iterrows():
                 symbol = row['symbol']
@@ -495,11 +545,16 @@ class ComprehensiveMLDataCollector:
                 earliest = pd.to_datetime(row['earliest_timestamp']).strftime('%Y-%m-%d %H:%M')
                 latest = pd.to_datetime(row['latest_timestamp']).strftime('%Y-%m-%d %H:%M')
                 completeness = row['completeness_pct']
-                status = row['status']
+                training_ready = row['training_ready']
+                prediction_ready = row['prediction_ready']
                 
                 total_records += records
+                if training_ready:
+                    training_ready_count += 1
+                if prediction_ready:
+                    prediction_ready_count += 1
                 
-                # Status emoji
+                # Status emojis
                 if completeness >= 90:
                     status_emoji = "🟢"
                 elif completeness >= 70:
@@ -507,11 +562,19 @@ class ComprehensiveMLDataCollector:
                 else:
                     status_emoji = "🔴"
                 
-                logging.info(f"{symbol:<12} {timeframe:<6} {records:<10,} {earliest:<20} {latest:<20} {completeness:>6.1f}% {status_emoji:>3}")
+                train_emoji = "✅" if training_ready else "❌"
+                pred_emoji = "✅" if prediction_ready else "❌"
+                
+                logging.info(
+                    f"{symbol:<12} {timeframe:<6} {records:<10,} {earliest:<20} {latest:<20} "
+                    f"{completeness:>6.1f}% {status_emoji:>3} {train_emoji:<7} {pred_emoji:<8}"
+                )
             
-            logging.info("-"*90)
+            logging.info("-"*110)
             logging.info(f"TOTAL RECORDS: {total_records:,}")
-            logging.info("="*90)
+            logging.info(f"Training Ready: {training_ready_count}/{len(df)} ({training_ready_count/len(df)*100:.0f}%)")
+            logging.info(f"Prediction Ready: {prediction_ready_count}/{len(df)} ({prediction_ready_count/len(df)*100:.0f}%)")
+            logging.info("="*110)
             
             # ML readiness assessment
             self._assess_ml_readiness(df)
@@ -520,57 +583,82 @@ class ComprehensiveMLDataCollector:
             logging.error(f"❌ Status display error: {e}")
     
     def _assess_ml_readiness(self, status_df: pd.DataFrame):
-        """Assess if data is ready for ML models"""
-        logging.info("\n🧠 ML READINESS ASSESSMENT")
+        """Assess if data is ready for ML models with Priority 1 requirements"""
+        logging.info("\n🧠 ML READINESS ASSESSMENT (Priority 1 Standards)")
         logging.info("="*70)
         
-        ml_ready = True
+        training_ready = []
+        prediction_ready = []
         issues = []
         
         for _, row in status_df.iterrows():
             symbol = row['symbol']
             timeframe = row['timeframe']
             records = row['records_count']
-            completeness = row['completeness_pct']
             
-            # Minimum requirements for LSTM/GRU
-            min_required = {
-                '5m': 1000,
-                '15m': 1000,
-                '1h': 2000,
-                '4h': 1000,
-                '1d': 500
-            }
+            config = self.timeframes[timeframe]
             
-            required = min_required.get(timeframe, 500)
+            # Check training readiness
+            if records >= config['min_for_training']:
+                training_ready.append(f"{symbol} {timeframe}")
+            else:
+                needed = config['min_for_training'] - records
+                issues.append(f"❌ {symbol} {timeframe}: {records} < {config['min_for_training']} (need {needed} for training)")
             
-            if records < required:
-                ml_ready = False
-                issues.append(f"{symbol} {timeframe}: {records} < {required} (need {required-records} more)")
+            # Check prediction readiness
+            if records >= config['min_for_prediction']:
+                prediction_ready.append(f"{symbol} {timeframe}")
+            else:
+                needed = config['min_for_prediction'] - records
+                issues.append(f"⚠️ {symbol} {timeframe}: {records} < {config['min_for_prediction']} (need {needed} for predictions)")
         
-        if ml_ready:
-            logging.info("✅ DATA IS READY FOR ML TRAINING!")
-            logging.info("   • All symbols have sufficient data")
-            logging.info("   • LSTM/GRU models can be trained")
-            logging.info("   • Recommended: Start with 1h and 4h timeframes")
+        # Summary
+        total = len(status_df)
+        
+        if len(training_ready) == total and len(prediction_ready) == total:
+            logging.info("✅ ALL DATA IS READY FOR ML!")
+            logging.info("   • All symbols can be trained")
+            logging.info("   • All symbols can make predictions")
+            logging.info("   • Daily predictions have 6+ months data ✨")
+            logging.info("\n🎯 Recommended Next Steps:")
+            logging.info("   1. Train models with optimized_ml_system_enhanced.py")
+            logging.info("   2. Focus on 1h and 4h timeframes (best performers)")
+            logging.info("   3. Prioritize DOT and ETH (highest accuracy)")
+        elif len(training_ready) == total:
+            logging.info("✅ TRAINING DATA READY!")
+            logging.info(f"   • {len(training_ready)}/{total} ready for training")
+            logging.info(f"   • {len(prediction_ready)}/{total} ready for predictions")
+            logging.info("\n⚠️ Prediction Issues:")
+            for issue in issues[:10]:
+                if "⚠️" in issue:
+                    logging.info(f"   {issue}")
         else:
-            logging.info("⚠️ DATA NEEDS MORE COLLECTION")
-            logging.info("   Issues found:")
-            for issue in issues[:5]:  # Show first 5 issues
-                logging.info(f"   - {issue}")
+            logging.info("⚠️ DATA COLLECTION INCOMPLETE")
+            logging.info(f"   Training Ready: {len(training_ready)}/{total}")
+            logging.info(f"   Prediction Ready: {len(prediction_ready)}/{total}")
+            logging.info("\n❌ Issues Found:")
+            for issue in issues[:10]:
+                logging.info(f"   {issue}")
             
-            if len(issues) > 5:
-                logging.info(f"   ... and {len(issues)-5} more")
+            if len(issues) > 10:
+                logging.info(f"   ... and {len(issues)-10} more issues")
+        
+        # Priority recommendations
+        logging.info("\n📋 PRIORITY TIMEFRAMES (based on analysis):")
+        logging.info("   ⭐ HIGH:   1h, 4h (best accuracy, stable predictions)")
+        logging.info("   🔵 MEDIUM: 15m, 1d (decent signals, needs careful use)")
+        logging.info("   ⚪ LOW:    5m (too noisy, consider removing)")
 
 
 def main():
     """Main execution function"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Comprehensive ML Data Collector')
+    parser = argparse.ArgumentParser(description='Comprehensive ML Data Collector V2')
     parser.add_argument('--status', action='store_true', help='Show database status only')
     parser.add_argument('--symbols', nargs='+', help='Specific symbols to collect (default: all)')
     parser.add_argument('--timeframes', nargs='+', help='Specific timeframes (default: all)')
+    parser.add_argument('--high-priority-only', action='store_true', help='Only collect HIGH priority timeframes (1h, 4h)')
     
     args = parser.parse_args()
     
@@ -591,6 +679,13 @@ def main():
                 tf: config for tf, config in collector.timeframes.items()
                 if tf in args.timeframes
             }
+        elif args.high_priority_only:
+            # Only collect high priority timeframes
+            collector.timeframes = {
+                tf: config for tf, config in collector.timeframes.items()
+                if config['priority'] == 'HIGH'
+            }
+            logging.info("🎯 HIGH PRIORITY ONLY MODE: Collecting 1h and 4h only")
         
         # Run collection
         collector.collect_all_comprehensive_data()
