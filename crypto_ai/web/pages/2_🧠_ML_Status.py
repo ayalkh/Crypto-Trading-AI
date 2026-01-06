@@ -53,8 +53,7 @@ if models:
             return pd.Series([symbol, timeframe, pred_type, algo])
         return pd.Series(["-", "-", "-", "-"])
 
-    # Temporarily suppress pandas warnings if needed or import pandas
-    import pandas as pd
+    # Temporarily suppress pandas warnings if needed
     meta = df_models['Filename'].apply(parse_filename)
     meta.columns = ['Symbol', 'Timeframe', 'Type', 'Algo']
     
