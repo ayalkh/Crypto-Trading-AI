@@ -691,100 +691,101 @@ class CryptoControlCenter:
         print("-" * 40)
         
         # Check if already running
-        if os.path.exists('logs/start_time.txt'):
-            print("⚠️ Automation system appears to be already running!")
-            
+        if os.path.exists('logs/automation.pid'):
+            print("⚠️ Automation system appears to be already running (PID file exists)!")
             try:
-                with open('logs/start_time.txt', 'r') as f:
-                    start_time = f.read().strip()
-                print(f"   Started: {start_time}")
+                with open('logs/automation.pid', 'r') as f:
+                    pid = f.read().strip()
+                print(f"   PID: {pid}")
             except:
                 pass
             
             print("\nOptions:")
-            print("1. Continue anyway (may cause conflicts)")
-            print("2. Stop existing and restart")
-            print("3. Cancel")
+            print("1. Restart (Stop & Start)")
+            print("2. Cancel")
             
-            choice = input("Select option (1-3): ").strip()
+            choice = input("Select option (1-2): ").strip()
             
-            if choice == "2":
+            if choice == "1":
                 self.stop_automation()
                 time.sleep(2)
-            elif choice == "3":
-                print("❌ Automation start cancelled")
-                return
-            elif choice != "1":
-                print("❌ Invalid choice")
-                return
-        
-        # Check prerequisites
-        print("🔍 Checking system prerequisites...")
-        
-        if not os.path.exists(self.db_path):
-            print("❌ No database found!")
-            choice = input("Run initial data collection now? (y/n): ").lower()
-            if choice == 'y':
-                self._run_collector([])
             else:
-                print("❌ Cannot start automation without data")
                 return
+
+        print(f"\n🚀 Starting 24/7 automation system (APScheduler)...")
+        print(f"💡 The system will run in the background")
         
-        if not os.path.exists(self.config_path):
-            print("⚠️ No configuration found, creating default...")
-            self.create_default_config()
-        
-        print("✅ Prerequisites checked")
-        
-        # Show automation settings
         try:
-            with open(self.config_path, 'r') as f:
-                config = json.load(f)
+            # Create logs dir
+            os.makedirs('logs', exist_ok=True)
             
-            data_interval = config.get('data_collection', {}).get('interval_minutes', 60)
-            signal_interval = config.get('signal_analysis', {}).get('interval_minutes', 15)
+            # Helper to run scheduler
+            scheduler_script = os.path.join('crypto_ai', 'automation', 'scheduler.py')
             
-            print(f"\n📋 AUTOMATION CONFIGURATION:")
-            print(f"   📊 Data collection: Every {data_interval} minutes")
-            print(f"   🔍 Signal analysis: Every {signal_interval} minutes")
-            print(f"   🔔 Alerts: {'✅ Enabled' if config.get('alerts', {}).get('enabled', True) else '❌ Disabled'}")
+            # Start process detached
+            if sys.platform == 'win32':
+                process = subprocess.Popen(
+                    [sys.executable, scheduler_script],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE
+                )
+            else:
+                process = subprocess.Popen(
+                    [sys.executable, scheduler_script],
+                    stdout=open('logs/scheduler_stdout.log', 'w'),
+                    stderr=open('logs/scheduler_stderr.log', 'w'),
+                    start_new_session=True
+                )
+            
+            # Save PID
+            with open('logs/automation.pid', 'w') as f:
+                f.write(str(process.pid))
+            
+            # Save start time
+            with open('logs/start_time.txt', 'w') as f:
+                f.write(datetime.now().isoformat())
+                
+            print(f"✅ Automation started! PID: {process.pid}")
+            print("💡 Check logs/scheduler.log for activity")
             
         except Exception as e:
-            print(f"⚠️ Error reading config: {e}")
-        
-        print(f"\n🚀 Starting 24/7 automation system...")
-        print(f"💡 The system will run continuously in the background")
-        print(f"⚠️ Close this window or press Ctrl+C to stop")
-        
-        confirm = input("\nStart automation now? (y/n): ").lower()
-        if confirm != 'y':
-            print("❌ Automation start cancelled")
-            return
-        
-        # Create automation marker
-        os.makedirs('logs', exist_ok=True)
-        with open('logs/start_time.txt', 'w') as f:
-            f.write(datetime.now().isoformat())
-        
-        print("✅ Automation system started!")
-        print("💡 Use option 6 to monitor status")
+            print(f"❌ Failed to start automation: {e}")
 
     def stop_automation(self):
         """Stop the automation system"""
         print("\n🛑 STOPPING AUTOMATION")
         print("-" * 30)
         
-        if not os.path.exists('logs/start_time.txt'):
-            print("ℹ️ Automation doesn't appear to be running")
+        if not os.path.exists('logs/automation.pid'):
+            print("ℹ️ Automation doesn't appear to be running (no PID file)")
+            # Clean up stale start_time if exists
+            if os.path.exists('logs/start_time.txt'):
+               os.remove('logs/start_time.txt')
             return
         
         try:
+            with open('logs/automation.pid', 'r') as f:
+                pid = int(f.read().strip())
+            
+            print(f"Stopping process {pid}...")
+            
+            try:
+                # Portable process killing
+                import signal
+                os.kill(pid, signal.SIGTERM)
+                print("✅ Process terminated")
+            except ProcessLookupError:
+                print("⚠️ Process not found (already stopped?)")
+            except Exception as e:
+                print(f"❌ Error killing process: {e}")
+                
+            # Cleanup files
             if os.path.exists('logs/start_time.txt'):
                 os.remove('logs/start_time.txt')
-                print("✅ Stopped automation system")
             
             if os.path.exists('logs/automation.pid'):
                 os.remove('logs/automation.pid')
+                
+            print("✅ Stopped automation system")
                 
         except Exception as e:
             print(f"❌ Error stopping automation: {e}")
