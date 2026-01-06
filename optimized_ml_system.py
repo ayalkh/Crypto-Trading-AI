@@ -29,6 +29,7 @@ import joblib
 from datetime import datetime
 import logging
 from typing import Dict, List, Tuple, Optional
+from crypto_ai.features import FeatureEngineer
 
 # Note: Logging will be configured in OptimizedCryptoMLSystem.__init__
 # to support dual output (console + file)
@@ -85,12 +86,14 @@ class OptimizedCryptoMLSystem:
     - GRU (Deep Learning - For 4h timeframe)
     """
     
+    
     def __init__(self, db_path='data/ml_crypto_data.db'):
         """Initialize the optimized ML system"""
         self.db_path = db_path
         self.models = {}
         self.scalers = {}
         self.feature_columns = []
+        self.feature_engineer = FeatureEngineer()
         
         # Create directories
         os.makedirs('ml_models', exist_ok=True)
@@ -204,122 +207,27 @@ class OptimizedCryptoMLSystem:
     def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Create comprehensive feature set optimized for gradient boosting
-        
-        Features (70+ total):
-        1. Price features (3)
-        2. Moving averages (8)
-        3. Technical indicators (15+)
-        4. Volume indicators (4)
-        5. Volatility features (9)
-        6. Momentum features (6)
-        7. Lag features (15)
-        8. Rolling statistics (9)
-        9. Time features (4)
+        DELEGATED to FeatureEngineer class for consistency
         """
         if df.empty:
             return df
+            
+        logging.info("🧠 Generating features using centralized FeatureEngineer...")
+        df_features = self.feature_engineer.create_features(df)
         
-        df = df.copy()
-        
-        # 1. Basic price features
-        df['price_change'] = df['close'].pct_change()
-        df['high_low_pct'] = (df['high'] - df['low']) / df['low']
-        df['close_open_pct'] = (df['close'] - df['open']) / df['open']
-        
-        # 2. Moving averages (optimized windows)
-        for window in [5, 10, 20, 50]:
-            df[f'ma_{window}'] = df['close'].rolling(window).mean()
-            df[f'ma_{window}_ratio'] = df['close'] / df[f'ma_{window}']
-        
-        # 3. Technical indicators
-        self._add_rsi(df, windows=[14, 21, 28])
-        self._add_macd(df)
-        self._add_bollinger_bands(df)
-        self._add_atr(df)
-        
-        # 4. Volume indicators
-        df['volume_sma'] = df['volume'].rolling(20).mean()
-        df['volume_ratio'] = df['volume'] / df['volume_sma']
-        df['price_volume'] = df['close'] * df['volume']
-        df['vwap'] = (df['price_volume'].rolling(20).sum() / 
-                      df['volume'].rolling(20).sum())
-        
-        # 5. Volatility features
-        for window in [5, 10, 20]:
-            df[f'volatility_{window}'] = df['price_change'].rolling(window).std()
-            df[f'volatility_ratio_{window}'] = (
-                df[f'volatility_{window}'] / 
-                df[f'volatility_{window}'].rolling(50).mean()
-            )
-        
-        # 6. Momentum features
-        for window in [5, 10, 20]:
-            df[f'momentum_{window}'] = df['close'] / df['close'].shift(window) - 1
-            df[f'roc_{window}'] = df['close'].pct_change(window)
-        
-        # 7. Lag features (important for time series)
-        for lag in [1, 2, 3, 5, 10]:
-            df[f'close_lag_{lag}'] = df['close'].shift(lag)
-            df[f'volume_lag_{lag}'] = df['volume'].shift(lag)
-            df[f'price_change_lag_{lag}'] = df['price_change'].shift(lag)
-        
-        # 8. Rolling statistics
-        for window in [5, 10, 20]:
-            df[f'close_mean_{window}'] = df['close'].rolling(window).mean()
-            df[f'close_std_{window}'] = df['close'].rolling(window).std()
-            df[f'volume_mean_{window}'] = df['volume'].rolling(window).mean()
-        
-        # 9. Time features (categorical for CatBoost)
-        df['hour'] = df.index.hour
-        df['day_of_week'] = df.index.dayofweek
-        df['day_of_month'] = df.index.day
-        df['is_weekend'] = (df.index.dayofweek >= 5).astype(int)
-        
-        # Drop NaN values
+        # Remove any rows with NaN values created during feature engineering
         initial_len = len(df)
-        df.dropna(inplace=True)
-        dropped = initial_len - len(df)
+        df_features.dropna(inplace=True)
+        dropped = initial_len - len(df_features)
         
         if dropped > 0:
             logging.info(f"ℹ️ Dropped {dropped} rows with NaN values")
-        
-        logging.info(f"✅ Created {len(df.columns)} features from {len(df)} samples")
-        return df
+            
+        logging.info(f"✅ Created {len(df_features.columns)} features from {len(df_features)} samples")
+        return df_features
     
-    def _add_rsi(self, df: pd.DataFrame, windows: List[int] = [14, 21, 28]):
-        """Add RSI indicators with multiple windows"""
-        for window in windows:
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-            rs = gain / loss
-            df[f'rsi_{window}'] = 100 - (100 / (1 + rs))
-    
-    def _add_macd(self, df: pd.DataFrame):
-        """Add MACD indicator"""
-        ema_12 = df['close'].ewm(span=12).mean()
-        ema_26 = df['close'].ewm(span=26).mean()
-        df['macd'] = ema_12 - ema_26
-        df['macd_signal'] = df['macd'].ewm(span=9).mean()
-        df['macd_histogram'] = df['macd'] - df['macd_signal']
-    
-    def _add_bollinger_bands(self, df: pd.DataFrame, window: int = 20):
-        """Add Bollinger Bands"""
-        rolling_mean = df['close'].rolling(window).mean()
-        rolling_std = df['close'].rolling(window).std()
-        df['bb_upper'] = rolling_mean + (rolling_std * 2)
-        df['bb_lower'] = rolling_mean - (rolling_std * 2)
-        df['bb_width'] = df['bb_upper'] - df['bb_lower']
-        df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-    
-    def _add_atr(self, df: pd.DataFrame, window: int = 14):
-        """Add Average True Range"""
-        high_low = df['high'] - df['low']
-        high_close = np.abs(df['high'] - df['close'].shift())
-        low_close = np.abs(df['low'] - df['close'].shift())
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = np.max(ranges, axis=1)
-        df['atr'] = true_range.rolling(window).mean()
+    # _add_rsi, _add_macd, _add_bollinger_bands, _add_atr are no longer needed here as they are in FeatureEngineer
+    # Removed to cleanup code
     
     def prepare_data(self, df: pd.DataFrame, prediction_type: str = 'price') -> Tuple[np.ndarray, np.ndarray, List[str]]:
         """
@@ -1030,7 +938,7 @@ def main():
     print(f"   Models per symbol/timeframe: 6-7 (LightGBM, XGBoost, CatBoost x2, GRU for 4h)")
     print(f"   Total models: ~{len(symbols) * len(timeframes) * 6} models\n")
     
-    input("Press ENTER to start training... ")
+    # input("Press ENTER to start training... ")
     
     # Track progress
     total_trained = 0

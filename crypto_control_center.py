@@ -243,7 +243,7 @@ class CryptoControlCenter:
 
     def _run_collector(self, args):
         """Run the unified ML collector"""
-        cmd = [sys.executable, 'comprehensive_ml_collector.py'] + args
+        cmd = [sys.executable, 'comprehensive_ml_collector_v2.py'] + args
         
         try:
             print(f"⚙️ Running: {' '.join(cmd)}")
@@ -447,7 +447,7 @@ class CryptoControlCenter:
 
     def _run_ml_training(self, args):
         """Run ML training"""
-        cmd = [sys.executable, 'train_all_timeframes.py'] + args
+        cmd = [sys.executable, 'optimized_ml_system.py'] + args
         
         try:
             print(f"⚙️ Starting ML training...")
