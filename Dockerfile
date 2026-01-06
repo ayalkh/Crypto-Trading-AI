@@ -24,8 +24,5 @@ ENV PYTHONPATH=/app
 # Create necessary directories
 RUN mkdir -p logs data ml_models alerts
 
-# Expose Streamlit port
-EXPOSE 8501
-
-# Default command runs the Streamlit App
-CMD ["streamlit", "run", "crypto_ai/web/Home.py", "--server.address=0.0.0.0"]
+# Default command runs the scheduler
+CMD ["python", "crypto_ai/automation/scheduler.py"]
