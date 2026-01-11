@@ -20,7 +20,7 @@ class FeatureEngineer:
     def __init__(self):
         pass
 
-    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def create_features(self, df: pd.DataFrame, sentiment_df: pd.DataFrame = None) -> pd.DataFrame:
         """
         Create comprehensive feature set (100+ features).
         This must be the SINGLE source of truth for feature generation.
@@ -99,6 +99,10 @@ class FeatureEngineer:
             df['day_of_week'] = dates.dayofweek
             df['day_of_month'] = dates.day
             df['is_weekend'] = (dates.dayofweek >= 5).astype(int)
+        
+        # 11. Sentiment Features (Optional)
+        if sentiment_df is not None and not sentiment_df.empty:
+            self._create_sentiment_features(df, sentiment_df)
         
         # Clean up infinite values
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -318,3 +322,62 @@ class FeatureEngineer:
         
         # Trend strength score (normalized ADX)
         df['trend_strength'] = df['adx'] / 100
+
+    def _create_sentiment_features(self, df: pd.DataFrame, sentiment_df: pd.DataFrame):
+        """
+        Merge and create sentiment features.
+        Uses merge_asof to align sentiment data with price candles.
+        """
+        try:
+            # Ensure timestamps are set and sorted
+            df_temp = df.copy()
+            sent_temp = sentiment_df.copy()
+            
+            if 'timestamp' not in df_temp.columns and isinstance(df_temp.index, pd.DatetimeIndex):
+                df_temp['timestamp'] = df_temp.index
+            
+            # Ensure both are datetime
+            df_temp['timestamp'] = pd.to_datetime(df_temp['timestamp'])
+            sent_temp['timestamp'] = pd.to_datetime(sent_temp['timestamp'])
+            
+            df_temp = df_temp.sort_values('timestamp')
+            sent_temp = sent_temp.sort_values('timestamp')
+            
+            # Merge using merge_asof (backward direction: match with previous known sentiment)
+            merged = pd.merge_asof(
+                df_temp, 
+                sent_temp[['timestamp', 'composite_score', 'twitter_volume', 'reddit_volume']], 
+                on='timestamp', 
+                direction='backward',
+                tolerance=pd.Timedelta('4h') # Allow up to 4h staleness
+            )
+            
+            # Generate features on the merged result
+            # Fill missing with 0 (neutral) if no sentiment found
+            merged['sentiment_score'] = merged['composite_score'].fillna(0)
+            merged['social_volume'] = (merged['twitter_volume'] + merged['reddit_volume']).fillna(0)
+            
+            # Rolling averages
+            for window in [1, 4, 12, 24]:
+                merged[f'sentiment_ma_{window}'] = merged['sentiment_score'].rolling(window=window, min_periods=1).mean()
+                merged[f'volume_ma_{window}'] = merged['social_volume'].rolling(window=window, min_periods=1).mean()
+            
+            # Sentiment Momentum
+            merged['sentiment_momentum'] = merged['sentiment_score'] - merged['sentiment_ma_4']
+            
+            # Assign back to original dataframe
+            # Note: This relies on the index being preserved or aligned.
+            # Ideally create_features returns the new df.
+            # Here we are modifying df in place in standard usage, but merge_asof created a new object.
+            
+            feature_cols = [c for c in merged.columns if 'sentiment' in c or 'social' in c]
+            for col in feature_cols:
+                # Align back to original df based on index if possible, or assume lengths match if sorted
+                if len(merged) == len(df):
+                    df[col] = merged[col].values
+                else:
+                    # Fallback if lengths differ (shouldn't happen with merge_asof on all rows)
+                    logging.warning("Length mismatch in sentiment feature creation")
+            
+        except Exception as e:
+            logging.error(f"Error creating sentiment features: {e}")

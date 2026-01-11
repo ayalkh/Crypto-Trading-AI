@@ -224,8 +224,51 @@ class OptimizedCryptoMLSystem:
         except Exception as e:
             logging.error(f"❌ Error loading data: {e}")
             return pd.DataFrame()
+
+    def load_sentiment(self, symbol: str, months_back: int = None) -> pd.DataFrame:
+        """Load sentiment data from database"""
+        try:
+            if not os.path.exists(self.db_path):
+                return pd.DataFrame()
+                
+            conn = sqlite3.connect(self.db_path)
+            
+            # Default to match price lookback
+            if months_back is None:
+                months_back = 6
+            
+            days_back = months_back * 30
+            
+            # Check if table exists first
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sentiment_data'")
+            if not cursor.fetchone():
+                conn.close()
+                return pd.DataFrame()
+            
+            query = """
+            SELECT *
+            FROM sentiment_data 
+            WHERE symbol = ? 
+            AND timestamp >= datetime('now', '-{} days')
+            ORDER BY timestamp
+            """.format(days_back)
+            
+            # Note: Stored symbol typically includes pair (BTC/USDT)
+            df = pd.read_sql_query(query, conn, params=(symbol,))
+            conn.close()
+            
+            if not df.empty:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                # Don't set index yet, feature engineer expects column or index handling
+                
+            return df
+            
+        except Exception as e:
+            logging.warning(f"⚠️ Could not load sentiment: {e}")
+            return pd.DataFrame()
     
-    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def create_features(self, df: pd.DataFrame, sentiment_df: pd.DataFrame = None) -> pd.DataFrame:
         """
         Create comprehensive feature set optimized for gradient boosting
         DELEGATED to FeatureEngineer class for consistency
@@ -234,7 +277,7 @@ class OptimizedCryptoMLSystem:
             return df
             
         logging.info("🧠 Generating features using centralized FeatureEngineer...")
-        df_features = self.feature_engineer.create_features(df)
+        df_features = self.feature_engineer.create_features(df, sentiment_df)
         
         # Remove any rows with NaN values created during feature engineering
         initial_len = len(df)
@@ -320,9 +363,14 @@ class OptimizedCryptoMLSystem:
         if df.empty or len(df) < 100:
             logging.error(f"❌ Insufficient data for {symbol} {timeframe}")
             return False
+            
+        # Load sentiment data (optional)
+        sentiment_df = self.load_sentiment(symbol)
+        if not sentiment_df.empty:
+            logging.info(f"🧠 Loaded {len(sentiment_df)} sentiment records")
         
         # Create features
-        df_features = self.create_features(df)
+        df_features = self.create_features(df, sentiment_df)
         if df_features.empty:
             logging.error(f"❌ Failed to create features for {symbol} {timeframe}")
             return False
