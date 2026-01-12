@@ -1027,12 +1027,18 @@ class OptimizedCryptoMLSystem:
         
         X_latest = df_features[available_features].iloc[-1:].values
         
-        # PRIORITY 1 FIX: Optimized ensemble weights
-        if timeframe == '4h':
-            weight_config = {'lightgbm': 0.45, 'xgboost': 0.30, 'catboost': 0.15, 'gru': 0.10}
-        else:
-            weight_config = {'lightgbm': 0.50, 'xgboost': 0.30, 'catboost': 0.20}
-        
+        if f"{symbol}_{timeframe}_price" in self.model_performance:
+            perf_data = self.model_performance[f"{symbol}_{timeframe}_price"]
+            if 'dynamic_weights' in perf_data:
+                logging.info(f"⚖️ Using dynamic weights for price: {perf_data['dynamic_weights']}")
+                # Merge dynamic weights with existing keys to ensure we have all required models
+                # (Dynamic weights might only contain valid ones, but we need structure)
+                for k, v in perf_data['dynamic_weights'].items():
+                    weight_config[k] = v
+
+        if timeframe == '4h' and 'gru' not in weight_config:
+             # Ensure GRU has a weight if not dynamically tuned (or if tuning excluded it)
+             weight_config['gru'] = 0.10
 
         # 1. Price predictions (Regression)
         price_preds = []
@@ -1052,7 +1058,7 @@ class OptimizedCryptoMLSystem:
                 if f"{symbol}_{timeframe}_price_lightgbm" in self.models:
                     pred = self.models[f"{symbol}_{timeframe}_price_lightgbm"].predict(X_scaled)[0]
                     price_preds.append(pred)
-                    weight = weight_config['lightgbm']
+                    weight = weight_config.get('lightgbm', 0.33)
                     price_weights.append(weight)
                     predictions['model_predictions']['lightgbm'] = {
                         'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
@@ -1065,7 +1071,7 @@ class OptimizedCryptoMLSystem:
                 if f"{symbol}_{timeframe}_price_xgboost" in self.models:
                     pred = self.models[f"{symbol}_{timeframe}_price_xgboost"].predict(X_scaled)[0]
                     price_preds.append(pred)
-                    weight = weight_config['xgboost']
+                    weight = weight_config.get('xgboost', 0.33)
                     price_weights.append(weight)
                     predictions['model_predictions']['xgboost'] = {
                         'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
@@ -1078,7 +1084,7 @@ class OptimizedCryptoMLSystem:
                 if f"{symbol}_{timeframe}_price_catboost" in self.models:
                     pred = self.models[f"{symbol}_{timeframe}_price_catboost"].predict(X_scaled)[0]
                     price_preds.append(pred)
-                    weight = weight_config['catboost']
+                    weight = weight_config.get('catboost', 0.33)
                     price_weights.append(weight)
                     predictions['model_predictions']['catboost'] = {
                         'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
@@ -1111,9 +1117,21 @@ class OptimizedCryptoMLSystem:
         direction_probs = []
         direction_weights = []
         
+        # Dynamic weights for direction
+        dir_weight_config = weight_config.copy() # Default to fallback
+        if f"{symbol}_{timeframe}_direction" in self.model_performance:
+             perf_data = self.model_performance[f"{symbol}_{timeframe}_direction"]
+             if 'dynamic_weights' in perf_data:
+                logging.info(f"⚖️ Using dynamic weights for direction: {perf_data['dynamic_weights']}")
+                for k, v in perf_data['dynamic_weights'].items():
+                    dir_weight_config[k] = v
+
         # Get direction selector
         selector_dir = self.feature_selectors.get(f"{symbol}_{timeframe}_direction")
         
+        # Breakdown to be populated by _get_model_prob or manually here
+        predictions['model_breakdown'] = {}
+
         if selector_dir:
             try:
                 # Transform features using selector
@@ -1121,7 +1139,14 @@ class OptimizedCryptoMLSystem:
                 
                 # Get probabilities from each model
                 for model_name in ['lightgbm', 'xgboost', 'catboost']:
-                    self._get_model_prob(symbol, timeframe, model_name, X_dir_selected, direction_probs, direction_weights, weight_config)
+                     prob = self._get_model_prob(symbol, timeframe, model_name, X_dir_selected, direction_probs, direction_weights, dir_weight_config)
+                     if prob is not None:
+                         predictions['model_breakdown'][model_name] = {
+                             'weight': float(dir_weight_config.get(model_name, 0)),
+                             'probability_up': float(prob),
+                             'prediction': 'UP' if prob > 0.5 else 'DOWN'
+                         }
+
             except Exception as e:
                 logging.error(f"⚠️ Direction model prediction failed: {e}")
             
@@ -1163,6 +1188,8 @@ class OptimizedCryptoMLSystem:
                 prob_up = self.models[model_key].predict_proba(X_scaled)[0][1]
                 probs_list.append(prob_up)
                 weights_list.append(weight_config.get(model_name, 0.33))
+                return prob_up
+        return None
 
     def _predict_gru_price(self, df, symbol, timeframe, price_preds, price_weights, weight_config, model_predictions=None):
         """Helper for GRU prediction to keep main method clean"""

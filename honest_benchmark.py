@@ -25,10 +25,7 @@ def run_honest_benchmark():
     
     # Check just the top performers from previous run
     targets = [
-        ('ETH/USDT', '1d'),
-        ('BTC/USDT', '15m'),
-        ('ADA/USDT', '4h'),
-        ('ETH/USDT', '4h')
+        ('BTC/USDT', '15m')
     ]
     
     for symbol, timeframe in targets:
@@ -68,6 +65,18 @@ def run_honest_benchmark():
         if os.path.exists(model_path):
             model = joblib.load(model_path)
             scaler = joblib.load(scaler_path)
+            
+            # Load feature selector
+            selector_path = f"ml_models/{safe_symbol}_{timeframe}_direction_selector.joblib"
+            print(f"   Checking selector path: {selector_path}")
+            if os.path.exists(selector_path):
+                print("   Selector FOUND! Loading...")
+                selector = joblib.load(selector_path)
+                print(f"   Shape before selection: {X_test.shape}")
+                X_test = selector.transform(X_test)
+                print(f"   Shape after selection: {X_test.shape}")
+            else:
+                print("   Selector NOT found!")
             
             X_test_scaled = scaler.transform(X_test)
             y_pred = model.predict(X_test_scaled)
