@@ -1,0 +1,108 @@
+{
+    "version": "baseline",
+    "description": "Baseline ML configuration that achieved 52.58% direction accuracy",
+    "commit": "be85612",
+    "date": "2025-12-25",
+    "feature_engineering": {
+        "total_features": 66,
+        "use_polynomial_features": false,
+        "use_interaction_terms": false,
+        "polynomial_degree": null,
+        "feature_groups": [
+            "basic_technical_indicators",
+            "moving_averages",
+            "momentum_indicators",
+            "volatility_indicators",
+            "volume_indicators",
+            "price_lags",
+            "temporal_features"
+        ]
+    },
+    "feature_selection": {
+        "enabled": false,
+        "method": null,
+        "n_features": null
+    },
+    "hyperparameter_tuning": {
+        "enabled": false,
+        "method": null,
+        "n_trials": null
+    },
+    "models": {
+        "lightgbm": {
+            "enabled": true,
+            "params": {
+                "n_estimators": 100,
+                "learning_rate": 0.1,
+                "max_depth": -1,
+                "num_leaves": 31,
+                "min_child_samples": 20,
+                "subsample": 1.0,
+                "colsample_bytree": 1.0,
+                "reg_alpha": 0.0,
+                "reg_lambda": 0.0,
+                "random_state": 42,
+                "verbose": -1
+            }
+        },
+        "xgboost": {
+            "enabled": true,
+            "params": {
+                "n_estimators": 100,
+                "learning_rate": 0.1,
+                "max_depth": 6,
+                "min_child_weight": 1,
+                "subsample": 1.0,
+                "colsample_bytree": 1.0,
+                "gamma": 0.0,
+                "reg_alpha": 0.0,
+                "reg_lambda": 1.0,
+                "random_state": 42,
+                "verbosity": 0
+            }
+        },
+        "catboost": {
+            "enabled": true,
+            "params": {
+                "iterations": 100,
+                "learning_rate": 0.1,
+                "depth": 6,
+                "l2_leaf_reg": 3.0,
+                "random_state": 42,
+                "verbose": false
+            }
+        },
+        "gru": {
+            "enabled": false,
+            "note": "Deep learning models were not part of baseline"
+        },
+        "lstm": {
+            "enabled": false,
+            "note": "Deep learning models were not part of baseline"
+        }
+    },
+    "ensemble": {
+        "weights": {
+            "1h": {
+                "lightgbm": 0.33,
+                "xgboost": 0.33,
+                "catboost": 0.34
+            },
+            "4h": {
+                "lightgbm": 0.33,
+                "xgboost": 0.33,
+                "catboost": 0.34
+            }
+        }
+    },
+    "performance_metrics": {
+        "avg_direction_accuracy": 0.5258,
+        "avg_r2": -0.002,
+        "avg_mse": 8.16e-05,
+        "best_results": {
+            "ETH/USDT_4h_catboost": 0.5641,
+            "ETH/USDT_4h_xgboost": 0.5609,
+            "BTC/USDT_4h_catboost": 0.5417
+        }
+    }
+}

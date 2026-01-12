@@ -5,12 +5,24 @@ AI-powered cryptocurrency trading assistant using Machine Learning and Deep Lear
 ## ✨ Features
 
 - **Multi-Timeframe Analysis**: Analyze signals across 5m, 15m, 1h, 4h, and 1d timeframes
-- **ML/DL Predictions**: Random Forest, XGBoost, and LSTM models for price and direction prediction
+- **ML/DL Predictions**: LightGBM, XGBoost, CatBoost ensemble for price and direction prediction
 - **Technical Indicators**: RSI, MACD, Bollinger Bands, and custom indicators
 - **Automated Trading Signals**: Combined signal analysis with confidence scoring
 - **Performance Tracking**: Backtesting and performance metrics
 - **24/7 Automation**: Scheduled data collection and analysis
 - **Alert System**: Email, desktop, and log-based alerts
+
+## 🎯 ML Performance
+
+**Current Configuration:** Enhanced (Advanced Features + Tuning)
+
+| Metric | Value |
+|--------|-------|
+| Configuration | 100+ features, feature selection, hyperparameter tuning |
+| Models | LightGBM, XGBoost, CatBoost, GRU, LSTM ensemble |
+| Advanced Indicators | Stochastic, Williams %R, OBV, Ichimoku, ADX, Market Regime |
+
+> **Note:** The system uses **enhanced configuration** with advanced technical indicators, feature selection, and hyperparameter optimization for maximum predictive power.
 
 ## 🚀 Quick Start
 

@@ -165,3 +165,7 @@ APScheduler==3.11.0
 streamlit==1.41.1
 plotly==5.24.1
 optuna>=4.0.0
+tweepy
+praw
+textblob
+vaderSentiment
