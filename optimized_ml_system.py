@@ -1159,6 +1159,202 @@ class OptimizedCryptoMLSystem:
                 except Exception as e:
                     logging.warning(f"⚠️ GRU prediction failed: {e}")
 
+            """
+            Make ensemble predictions combining all models
+            
+            Weights by timeframe (OPTIMIZED - Priority 1):
+            - 1h: 50% LightGBM, 30% XGBoost, 20% CatBoost
+            - 4h: 45% LightGBM, 30% XGBoost, 15% CatBoost, 10% GRU
+            """
+            logging.info(f"\n{'='*60}")
+            logging.info(f"🔮 Ensemble Prediction: {symbol} {timeframe}")
+            logging.info(f"{'='*60}\n")
+            
+            # PRIORITY 1 FIX: Adaptive lookback based on timeframe
+            lookback_map = {
+                '5m': 1, '15m': 1, '1h': 2, '4h': 3, '1d': 6
+            }
+            months_back = lookback_map.get(timeframe, 1)
+            logging.info(f"📅 Using {months_back} months lookback for {timeframe}")
+            
+            # Load recent data with appropriate lookback
+            df = self.load_data(symbol, timeframe, months_back=months_back)
+            if df.empty or len(df) < 50:
+                logging.error("❌ Insufficient data for prediction")
+                return {}
+            
+            # Create features
+            df_features = self.create_features(df)
+            if df_features.empty:
+                logging.error("❌ Failed to create features")
+                return {}
+            
+            predictions = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'timestamp': datetime.now().isoformat(),
+                'current_price': float(df['close'].iloc[-1])
+            }
+            
+            # Load models
+            self._load_models(symbol, timeframe)
+            
+            # Get latest features
+            exclude_cols = ['open', 'high', 'low', 'close', 'volume']
+            available_features = [col for col in df_features.columns if col not in exclude_cols]
+            
+            if not available_features:
+                logging.error("❌ No features available")
+                return predictions
+            
+            X_latest = df_features[available_features].iloc[-1:].values
+            
+            # PRIORITY 1 FIX: Optimized ensemble weights
+            if timeframe == '4h':
+                weight_config = {'lightgbm': 0.45, 'xgboost': 0.30, 'catboost': 0.15, 'gru': 0.10}
+            else:
+                weight_config = {'lightgbm': 0.50, 'xgboost': 0.30, 'catboost': 0.20}
+            
+            # ===== NEW: Store individual model predictions =====
+            model_predictions = {}
+            
+            # Price predictions
+            price_preds = []
+            price_weights = []
+            
+            # LightGBM
+            if f"{symbol}_{timeframe}_price_lightgbm" in self.models:
+                scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
+                if scaler is not None:
+                    X_scaled = scaler.transform(X_latest)
+                    pred = self.models[f"{symbol}_{timeframe}_price_lightgbm"].predict(X_scaled)[0]
+                    price_preds.append(pred)
+                    price_weights.append(weight_config['lightgbm'])
+                    logging.info(f"📊 LightGBM price: {pred:+.4%} (weight: {weight_config['lightgbm']:.0%})")
+                    
+                    # Store individual prediction
+                    model_predictions['lightgbm'] = {
+                        'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
+                        'price_change_pct': float(pred),
+                        'confidence': float(weight_config['lightgbm'])
+                    }
+            
+            # XGBoost
+            if f"{symbol}_{timeframe}_price_xgboost" in self.models:
+                scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
+                if scaler is not None:
+                    X_scaled = scaler.transform(X_latest)
+                    pred = self.models[f"{symbol}_{timeframe}_price_xgboost"].predict(X_scaled)[0]
+                    price_preds.append(pred)
+                    price_weights.append(weight_config['xgboost'])
+                    logging.info(f"📊 XGBoost price: {pred:+.4%} (weight: {weight_config['xgboost']:.0%})")
+                    
+                    # Store individual prediction
+                    model_predictions['xgboost'] = {
+                        'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
+                        'price_change_pct': float(pred),
+                        'confidence': float(weight_config['xgboost'])
+                    }
+            
+            # CatBoost
+            if f"{symbol}_{timeframe}_price_catboost" in self.models:
+                scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
+                if scaler is not None:
+                    X_scaled = scaler.transform(X_latest)
+                    pred = self.models[f"{symbol}_{timeframe}_price_catboost"].predict(X_scaled)[0]
+                    price_preds.append(pred)
+                    price_weights.append(weight_config['catboost'])
+                    logging.info(f"📊 CatBoost price: {pred:+.4%} (weight: {weight_config['catboost']:.0%})")
+                    
+                    # Store individual prediction
+                    model_predictions['catboost'] = {
+                        'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
+                        'price_change_pct': float(pred),
+                        'confidence': float(weight_config['catboost'])
+                    }
+            
+            # GRU (4h only)
+            if timeframe == '4h' and f"{symbol}_{timeframe}_gru" in self.models:
+                sequence_length = 60
+                if len(df) >= sequence_length:
+                    scaler = self.scalers.get(f"{symbol}_{timeframe}_gru")
+                    if scaler is not None:
+                        prices = df['close'].values[-sequence_length:].reshape(-1, 1)
+                        scaled_prices = scaler.transform(prices)
+                        X_gru = scaled_prices.reshape(1, sequence_length, 1)
+                        
+                        try:
+                            gru_pred_scaled = self.models[f"{symbol}_{timeframe}_gru"].predict(X_gru, verbose=0)[0][0]
+                            gru_pred_price = scaler.inverse_transform([[gru_pred_scaled]])[0][0]
+                            gru_pred_change = gru_pred_price / df['close'].iloc[-1] - 1
+                            
+                            price_preds.append(gru_pred_change)
+                            price_weights.append(weight_config.get('gru', 0.10))
+                            logging.info(f"🧠 GRU price: {gru_pred_change:+.4%} (weight: {weight_config.get('gru', 0.10):.0%})")
+                            
+                            # Store individual prediction
+                            model_predictions['gru'] = {
+                                'predicted_price': float(gru_pred_price),
+                                'price_change_pct': float(gru_pred_change),
+                                'confidence': float(weight_config.get('gru', 0.10))
+                            }
+                        except Exception as e:
+                            logging.warning(f"⚠️ GRU prediction failed: {e}")
+            
+            # Calculate ensemble price prediction
+            if price_preds:
+                # Normalize weights
+                total_weight = sum(price_weights)
+                normalized_weights = [w/total_weight for w in price_weights]
+                
+                ensemble_price_change = sum(p * w for p, w in zip(price_preds, normalized_weights))
+                
+                # PRIORITY 1 FIX: Clip unrealistic predictions
+                prediction_limits = {
+                    '5m': 0.02, '15m': 0.03, '1h': 0.05, '4h': 0.10, '1d': 0.15
+                }
+                max_change = prediction_limits.get(timeframe, 0.05)
+                original_pred = ensemble_price_change
+                ensemble_price_change = np.clip(ensemble_price_change, -max_change, max_change)
+                
+                if abs(original_pred) != abs(ensemble_price_change):
+                    logging.warning(f"⚠️ Clipped prediction from {original_pred:+.4%} to {ensemble_price_change:+.4%}")
+                
+                predictions['price_change_pct'] = float(ensemble_price_change * 100)
+                predictions['predicted_price'] = float(df['close'].iloc[-1] * (1 + ensemble_price_change))
+                
+                logging.info(f"\n💡 Ensemble Price Change: {ensemble_price_change:+.4%}")
+                logging.info(f"💰 Predicted Price: ${predictions['predicted_price']:.2f}")
+            
+            # Direction predictions
+            direction_votes = {'UP': 0, 'DOWN': 0}
+            
+            # All models use scaled data
+            for model_type in ['lightgbm', 'xgboost', 'catboost']:
+                model_key = f"{symbol}_{timeframe}_direction_{model_type}"
+                if model_key in self.models:
+                    scaler = self.scalers.get(f"{symbol}_{timeframe}_direction")
+                    if scaler is not None:
+                        X_scaled = scaler.transform(X_latest)
+                        direction_pred = self.models[model_key].predict(X_scaled)[0]
+                        direction_votes['UP' if direction_pred == 1 else 'DOWN'] += 1
+            
+            if sum(direction_votes.values()) > 0:
+                predictions['direction'] = max(direction_votes, key=direction_votes.get)
+                predictions['direction_confidence'] = direction_votes[predictions['direction']] / sum(direction_votes.values())
+                
+                # Use improved confidence calculation
+                predictions['confidence'] = self.calculate_confidence(price_preds, direction_votes)
+                
+                logging.info(f"📊 Confidence: {predictions['confidence']:.2%}")
+                logging.info(f"🎯 Direction: {predictions['direction']} (confidence: {predictions['direction_confidence']:.2%})")
+            
+            # ===== NEW: Add model predictions to return value =====
+            predictions['model_predictions'] = model_predictions
+            
+            logging.info(f"\n✅ Ensemble prediction complete!\n")
+            return predictions
+    
     def calculate_confidence(self, price_preds: list, direction_votes: dict) -> float:
         """
         Legacy method kept for interface compatibility, but logic moved to probability-based approach above.
