@@ -20,6 +20,7 @@ import warnings
 import argparse
 import json
 from typing import Dict, Optional
+from crypto_ai.features import FeatureEngineer
 
 # Fix Windows encoding
 if sys.platform.startswith('win'):
@@ -488,6 +489,7 @@ class MLPredictor:
             logging.warning(f"⚠️ Models directory not found: {models_dir}")
         
         logging.info(f"🤖 ML Predictor initialized (Models available: {self.models_available})")
+        self.feature_engineer = FeatureEngineer()
     
     def _scan_available_models(self):
         """Scan and count available models"""
@@ -516,102 +518,18 @@ class MLPredictor:
     def _create_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Create features EXACTLY as done during training
-        Must match optimized_ml_system.py's create_features()
+        Delegated to FeatureEngineer class for consistency
         """
         if df.empty or len(df) < 60:
             return pd.DataFrame()
         
-        df = df.copy()
+        logging.info("🧠 Generating features using centralized FeatureEngineer...")
+        df_features = self.feature_engineer.create_features(df)
         
-        try:
-            # 1. Basic price features
-            df['price_change'] = df['close'].pct_change()
-            df['high_low_pct'] = (df['high'] - df['low']) / df['low']
-            df['close_open_pct'] = (df['close'] - df['open']) / df['open']
-            
-            # 2. Moving averages
-            for window in [5, 10, 20, 50]:
-                df[f'ma_{window}'] = df['close'].rolling(window).mean()
-                df[f'ma_{window}_ratio'] = df['close'] / df[f'ma_{window}']
-            
-            # 3. RSI
-            for window in [14, 21, 28]:
-                delta = df['close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-                rs = gain / loss
-                df[f'rsi_{window}'] = 100 - (100 / (1 + rs))
-            
-            # 4. MACD
-            ema_12 = df['close'].ewm(span=12).mean()
-            ema_26 = df['close'].ewm(span=26).mean()
-            df['macd'] = ema_12 - ema_26
-            df['macd_signal'] = df['macd'].ewm(span=9).mean()
-            df['macd_histogram'] = df['macd'] - df['macd_signal']
-            
-            # 5. Bollinger Bands
-            window = 20
-            rolling_mean = df['close'].rolling(window).mean()
-            rolling_std = df['close'].rolling(window).std()
-            df['bb_upper'] = rolling_mean + (rolling_std * 2)
-            df['bb_lower'] = rolling_mean - (rolling_std * 2)
-            df['bb_width'] = df['bb_upper'] - df['bb_lower']
-            df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-            
-            # 6. ATR
-            high_low = df['high'] - df['low']
-            high_close = np.abs(df['high'] - df['close'].shift())
-            low_close = np.abs(df['low'] - df['close'].shift())
-            ranges = pd.concat([high_low, high_close, low_close], axis=1)
-            true_range = np.max(ranges, axis=1)
-            df['atr'] = true_range.rolling(14).mean()
-            
-            # 7. Volume indicators
-            df['volume_sma'] = df['volume'].rolling(20).mean()
-            df['volume_ratio'] = df['volume'] / df['volume_sma']
-            df['price_volume'] = df['close'] * df['volume']
-            df['vwap'] = (df['price_volume'].rolling(20).sum() / 
-                          df['volume'].rolling(20).sum())
-            
-            # 8. Volatility features
-            for window in [5, 10, 20]:
-                df[f'volatility_{window}'] = df['price_change'].rolling(window).std()
-                df[f'volatility_ratio_{window}'] = (
-                    df[f'volatility_{window}'] / 
-                    df[f'volatility_{window}'].rolling(50).mean()
-                )
-            
-            # 9. Momentum features
-            for window in [5, 10, 20]:
-                df[f'momentum_{window}'] = df['close'] / df['close'].shift(window) - 1
-                df[f'roc_{window}'] = df['close'].pct_change(window)
-            
-            # 10. Lag features
-            for lag in [1, 2, 3, 5, 10]:
-                df[f'close_lag_{lag}'] = df['close'].shift(lag)
-                df[f'volume_lag_{lag}'] = df['volume'].shift(lag)
-                df[f'price_change_lag_{lag}'] = df['price_change'].shift(lag)
-            
-            # 11. Rolling statistics
-            for window in [5, 10, 20]:
-                df[f'close_mean_{window}'] = df['close'].rolling(window).mean()
-                df[f'close_std_{window}'] = df['close'].rolling(window).std()
-                df[f'volume_mean_{window}'] = df['volume'].rolling(window).mean()
-            
-            # 12. Time features
-            df['hour'] = df['timestamp'].dt.hour
-            df['day_of_week'] = df['timestamp'].dt.dayofweek
-            df['day_of_month'] = df['timestamp'].dt.day
-            df['is_weekend'] = (df['timestamp'].dt.dayofweek >= 5).astype(int)
-            
-            # Drop NaN values
-            df = df.dropna()
-            
-            return df
-            
-        except Exception as e:
-            logging.error(f"❌ Error creating features: {e}")
-            return pd.DataFrame()
+        # Drop NaN values
+        df_features.dropna(inplace=True)
+        
+        return df_features
     
     def _load_model_components(self, symbol: str, timeframe: str, model_type: str):
         """Load model, scaler, and feature list for a specific configuration"""

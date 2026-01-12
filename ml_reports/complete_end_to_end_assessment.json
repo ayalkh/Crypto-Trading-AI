@@ -1,0 +1,137 @@
+{
+  "timestamp": "2026-01-10T19:59:39.047882",
+  "results": {
+    "ETH/USDT_15m": {
+      "LightGBM": {
+        "accuracy": 0.5458823529411765,
+        "precision": 0.5369261477045908,
+        "recall": 0.6359338061465721,
+        "f1": 0.5822510822510822,
+        "auc_roc": 0.5644637113071016,
+        "auc_pr": 0.5464746997647628,
+        "true_negatives": 195,
+        "false_positives": 232,
+        "false_negatives": 154,
+        "true_positives": 269
+      },
+      "XGBoost": {
+        "accuracy": 0.548235294117647,
+        "precision": 0.5389221556886228,
+        "recall": 0.6382978723404256,
+        "f1": 0.5844155844155844,
+        "auc_roc": 0.5611750571638956,
+        "auc_pr": 0.5355819144827911,
+        "true_negatives": 196,
+        "false_positives": 231,
+        "false_negatives": 153,
+        "true_positives": 270
+      },
+      "CatBoost": {
+        "accuracy": 0.5470588235294118,
+        "precision": 0.5448113207547169,
+        "recall": 0.5460992907801419,
+        "f1": 0.5454545454545454,
+        "auc_roc": 0.5501409027743176,
+        "auc_pr": 0.5238220318012288,
+        "true_negatives": 234,
+        "false_positives": 193,
+        "false_negatives": 192,
+        "true_positives": 231
+      },
+      "LSTM": {
+        "accuracy": 0.5211764705882352,
+        "precision": 0.5141342756183745,
+        "recall": 0.6879432624113475,
+        "f1": 0.5884732052578362,
+        "auc_roc": 0.5183837981187126,
+        "auc_pr": 0.5218241123679238,
+        "true_negatives": 152,
+        "false_positives": 275,
+        "false_negatives": 132,
+        "true_positives": 291
+      },
+      "Ensemble_Equal": {
+        "accuracy": 0.5552941176470588,
+        "precision": 0.5456389452332657,
+        "recall": 0.6359338061465721,
+        "f1": 0.5873362445414847,
+        "auc_roc": 0.5696126142585857,
+        "auc_pr": 0.5408596763904212
+      },
+      "Ensemble_Optimized": {
+        "accuracy": 0.5552941176470588,
+        "precision": 0.5463917525773195,
+        "recall": 0.6264775413711584,
+        "f1": 0.5837004405286343,
+        "auc_roc": 0.5698949734526993,
+        "auc_pr": 0.5411681568517686
+      }
+    },
+    "BTC/USDT_15m": {
+      "LightGBM": {
+        "accuracy": 0.5294117647058824,
+        "precision": 0.5285087719298246,
+        "recall": 0.5657276995305164,
+        "f1": 0.546485260770975,
+        "auc_roc": 0.5225053149083179,
+        "auc_pr": 0.5183134403606375,
+        "true_negatives": 209,
+        "false_positives": 215,
+        "false_negatives": 185,
+        "true_positives": 241
+      },
+      "XGBoost": {
+        "accuracy": 0.5058823529411764,
+        "precision": 0.5071428571428571,
+        "recall": 0.5,
+        "f1": 0.5035460992907801,
+        "auc_roc": 0.5353275312250864,
+        "auc_pr": 0.5379826141926234,
+        "true_negatives": 217,
+        "false_positives": 207,
+        "false_negatives": 213,
+        "true_positives": 213
+      },
+      "CatBoost": {
+        "accuracy": 0.5117647058823529,
+        "precision": 0.5146666666666667,
+        "recall": 0.45305164319248825,
+        "f1": 0.4818976279650437,
+        "auc_roc": 0.5319115953583134,
+        "auc_pr": 0.5310263961259171,
+        "true_negatives": 242,
+        "false_positives": 182,
+        "false_negatives": 233,
+        "true_positives": 193
+      },
+      "LSTM": {
+        "accuracy": 0.5070588235294118,
+        "precision": 0.5098039215686274,
+        "recall": 0.4272300469483568,
+        "f1": 0.4648786717752235,
+        "auc_roc": 0.5211599787403667,
+        "auc_pr": 0.5204203575577198,
+        "true_negatives": 249,
+        "false_positives": 175,
+        "false_negatives": 244,
+        "true_positives": 182
+      },
+      "Ensemble_Equal": {
+        "accuracy": 0.5047058823529412,
+        "precision": 0.5059952038369304,
+        "recall": 0.4953051643192488,
+        "f1": 0.5005931198102017,
+        "auc_roc": 0.5378299672247321,
+        "auc_pr": 0.5485869793266721
+      },
+      "Ensemble_Optimized": {
+        "accuracy": 0.5011764705882353,
+        "precision": 0.5024038461538461,
+        "recall": 0.49061032863849763,
+        "f1": 0.49643705463182897,
+        "auc_roc": 0.5376251217999823,
+        "auc_pr": 0.5499030661646336
+      }
+    }
+  }
+}

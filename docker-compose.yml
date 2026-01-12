@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  crypto-bot:
+    build: .
+    container_name: crypto_ai_bot
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./ml_models:/app/ml_models
+      - ./automation_config.json:/app/automation_config.json
+    environment:
+      - TZ=UTC
+    deploy:
+      resources:
+        limits:
+          memory: 4G
