@@ -29,7 +29,6 @@ import joblib
 from datetime import datetime
 import logging
 from typing import Dict, List, Tuple, Optional
-from crypto_ai.features import FeatureEngineer
 
 # Note: Logging will be configured in OptimizedCryptoMLSystem.__init__
 # to support dual output (console + file)
@@ -38,8 +37,7 @@ from crypto_ai.features import FeatureEngineer
 try:
     from sklearn.model_selection import TimeSeriesSplit
     from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, classification_report, precision_score, recall_score, f1_score
-    from sklearn.feature_selection import SelectKBest, mutual_info_classif, f_regression
+    from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, classification_report
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
@@ -77,14 +75,6 @@ except ImportError:
     DL_AVAILABLE = False
     print("⚠️ TensorFlow not available. Install: pip install tensorflow")
 
-try:
-    import optuna
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
-    OPTUNA_AVAILABLE = True
-except ImportError:
-    OPTUNA_AVAILABLE = False
-    print("⚠️ Optuna not available. Install: pip install optuna")
-
 
 class OptimizedCryptoMLSystem:
     """
@@ -95,26 +85,12 @@ class OptimizedCryptoMLSystem:
     - GRU (Deep Learning - For 4h timeframe)
     """
     
-    
-    def __init__(self, db_path='data/ml_crypto_data.db', n_features=50, enable_tuning=False, n_trials=50):
-        """Initialize the optimized ML system
-        
-        Args:
-            db_path: Path to database
-            n_features: Number of features to select (default: 50)
-            enable_tuning: Enable hyperparameter tuning with Optuna
-            n_trials: Number of Optuna trials for hyperparameter tuning
-        """
+    def __init__(self, db_path='data/ml_crypto_data.db'):
+        """Initialize the optimized ML system"""
         self.db_path = db_path
         self.models = {}
         self.scalers = {}
         self.feature_columns = []
-        self.feature_engineer = FeatureEngineer()
-        self.n_features = n_features
-        self.enable_tuning = enable_tuning
-        self.n_trials = n_trials
-        self.feature_selectors = {}  # Store feature selectors
-        self.model_performance = {}  # Store validation performance for dynamic weights
         
         # Create directories
         os.makedirs('ml_models', exist_ok=True)
@@ -128,15 +104,15 @@ class OptimizedCryptoMLSystem:
         logging.info("🧠 Optimized Crypto ML System initialized")
         logging.info(f"📁 Database: {self.db_path}")
         logging.info(f"📝 Log file: {self.log_file}")
-        logging.info("✨ Enhanced Features:")
-        logging.info(f"   • Feature Selection: Top {self.n_features} features")
-        logging.info(f"   • Hyperparameter Tuning: {'Enabled' if self.enable_tuning else 'Disabled'}")
-        logging.info(f"   • Dynamic Model Weights: Enabled")
+        logging.info("✨ Priority 1 ML fixes applied:")
+        logging.info("   • Adaptive lookback: 1d=6mo, 4h=3mo, 1h=2mo")
+        logging.info("   • Prediction clipping enabled by timeframe")
+        logging.info("   • GRU weight optimized: 25% → 10%")
+        logging.info("   • Improved confidence calculation")
         logging.info(f"✅ LightGBM: {LIGHTGBM_AVAILABLE}")
         logging.info(f"✅ XGBoost: {XGBOOST_AVAILABLE}")
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
         logging.info(f"✅ TensorFlow: {DL_AVAILABLE}")
-        logging.info(f"✅ Optuna: {OPTUNA_AVAILABLE}")
     
     def _setup_logging(self):
         """Setup logging to both console and file"""
@@ -224,74 +200,126 @@ class OptimizedCryptoMLSystem:
         except Exception as e:
             logging.error(f"❌ Error loading data: {e}")
             return pd.DataFrame()
-
-    def load_sentiment(self, symbol: str, months_back: int = None) -> pd.DataFrame:
-        """Load sentiment data from database"""
-        try:
-            if not os.path.exists(self.db_path):
-                return pd.DataFrame()
-                
-            conn = sqlite3.connect(self.db_path)
-            
-            # Default to match price lookback
-            if months_back is None:
-                months_back = 6
-            
-            days_back = months_back * 30
-            
-            # Check if table exists first
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sentiment_data'")
-            if not cursor.fetchone():
-                conn.close()
-                return pd.DataFrame()
-            
-            query = """
-            SELECT *
-            FROM sentiment_data 
-            WHERE symbol = ? 
-            AND timestamp >= datetime('now', '-{} days')
-            ORDER BY timestamp
-            """.format(days_back)
-            
-            # Note: Stored symbol typically includes pair (BTC/USDT)
-            df = pd.read_sql_query(query, conn, params=(symbol,))
-            conn.close()
-            
-            if not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                # Don't set index yet, feature engineer expects column or index handling
-                
-            return df
-            
-        except Exception as e:
-            logging.warning(f"⚠️ Could not load sentiment: {e}")
-            return pd.DataFrame()
     
-    def create_features(self, df: pd.DataFrame, sentiment_df: pd.DataFrame = None) -> pd.DataFrame:
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Create comprehensive feature set optimized for gradient boosting
-        DELEGATED to FeatureEngineer class for consistency
+        
+        Features (70+ total):
+        1. Price features (3)
+        2. Moving averages (8)
+        3. Technical indicators (15+)
+        4. Volume indicators (4)
+        5. Volatility features (9)
+        6. Momentum features (6)
+        7. Lag features (15)
+        8. Rolling statistics (9)
+        9. Time features (4)
         """
         if df.empty:
             return df
-            
-        logging.info("🧠 Generating features using centralized FeatureEngineer...")
-        df_features = self.feature_engineer.create_features(df, sentiment_df)
         
-        # Remove any rows with NaN values created during feature engineering
+        df = df.copy()
+        
+        # 1. Basic price features
+        df['price_change'] = df['close'].pct_change()
+        df['high_low_pct'] = (df['high'] - df['low']) / df['low']
+        df['close_open_pct'] = (df['close'] - df['open']) / df['open']
+        
+        # 2. Moving averages (optimized windows)
+        for window in [5, 10, 20, 50]:
+            df[f'ma_{window}'] = df['close'].rolling(window).mean()
+            df[f'ma_{window}_ratio'] = df['close'] / df[f'ma_{window}']
+        
+        # 3. Technical indicators
+        self._add_rsi(df, windows=[14, 21, 28])
+        self._add_macd(df)
+        self._add_bollinger_bands(df)
+        self._add_atr(df)
+        
+        # 4. Volume indicators
+        df['volume_sma'] = df['volume'].rolling(20).mean()
+        df['volume_ratio'] = df['volume'] / df['volume_sma']
+        df['price_volume'] = df['close'] * df['volume']
+        df['vwap'] = (df['price_volume'].rolling(20).sum() / 
+                      df['volume'].rolling(20).sum())
+        
+        # 5. Volatility features
+        for window in [5, 10, 20]:
+            df[f'volatility_{window}'] = df['price_change'].rolling(window).std()
+            df[f'volatility_ratio_{window}'] = (
+                df[f'volatility_{window}'] / 
+                df[f'volatility_{window}'].rolling(50).mean()
+            )
+        
+        # 6. Momentum features
+        for window in [5, 10, 20]:
+            df[f'momentum_{window}'] = df['close'] / df['close'].shift(window) - 1
+            df[f'roc_{window}'] = df['close'].pct_change(window)
+        
+        # 7. Lag features (important for time series)
+        for lag in [1, 2, 3, 5, 10]:
+            df[f'close_lag_{lag}'] = df['close'].shift(lag)
+            df[f'volume_lag_{lag}'] = df['volume'].shift(lag)
+            df[f'price_change_lag_{lag}'] = df['price_change'].shift(lag)
+        
+        # 8. Rolling statistics
+        for window in [5, 10, 20]:
+            df[f'close_mean_{window}'] = df['close'].rolling(window).mean()
+            df[f'close_std_{window}'] = df['close'].rolling(window).std()
+            df[f'volume_mean_{window}'] = df['volume'].rolling(window).mean()
+        
+        # 9. Time features (categorical for CatBoost)
+        df['hour'] = df.index.hour
+        df['day_of_week'] = df.index.dayofweek
+        df['day_of_month'] = df.index.day
+        df['is_weekend'] = (df.index.dayofweek >= 5).astype(int)
+        
+        # Drop NaN values
         initial_len = len(df)
-        df_features.dropna(inplace=True)
-        dropped = initial_len - len(df_features)
+        df.dropna(inplace=True)
+        dropped = initial_len - len(df)
         
         if dropped > 0:
             logging.info(f"ℹ️ Dropped {dropped} rows with NaN values")
-            
-        logging.info(f"✅ Created {len(df_features.columns)} features from {len(df_features)} samples")
-        return df_features
+        
+        logging.info(f"✅ Created {len(df.columns)} features from {len(df)} samples")
+        return df
     
-    # _add_rsi, _add_macd, _add_bollinger_bands, _add_atr are no longer needed here as they are in FeatureEngineer
-    # Removed to cleanup code
+    def _add_rsi(self, df: pd.DataFrame, windows: List[int] = [14, 21, 28]):
+        """Add RSI indicators with multiple windows"""
+        for window in windows:
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+            rs = gain / loss
+            df[f'rsi_{window}'] = 100 - (100 / (1 + rs))
+    
+    def _add_macd(self, df: pd.DataFrame):
+        """Add MACD indicator"""
+        ema_12 = df['close'].ewm(span=12).mean()
+        ema_26 = df['close'].ewm(span=26).mean()
+        df['macd'] = ema_12 - ema_26
+        df['macd_signal'] = df['macd'].ewm(span=9).mean()
+        df['macd_histogram'] = df['macd'] - df['macd_signal']
+    
+    def _add_bollinger_bands(self, df: pd.DataFrame, window: int = 20):
+        """Add Bollinger Bands"""
+        rolling_mean = df['close'].rolling(window).mean()
+        rolling_std = df['close'].rolling(window).std()
+        df['bb_upper'] = rolling_mean + (rolling_std * 2)
+        df['bb_lower'] = rolling_mean - (rolling_std * 2)
+        df['bb_width'] = df['bb_upper'] - df['bb_lower']
+        df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+    
+    def _add_atr(self, df: pd.DataFrame, window: int = 14):
+        """Add Average True Range"""
+        high_low = df['high'] - df['low']
+        high_close = np.abs(df['high'] - df['close'].shift())
+        low_close = np.abs(df['low'] - df['close'].shift())
+        ranges = pd.concat([high_low, high_close, low_close], axis=1)
+        true_range = np.max(ranges, axis=1)
+        df['atr'] = true_range.rolling(window).mean()
     
     def prepare_data(self, df: pd.DataFrame, prediction_type: str = 'price') -> Tuple[np.ndarray, np.ndarray, List[str]]:
         """
@@ -363,14 +391,9 @@ class OptimizedCryptoMLSystem:
         if df.empty or len(df) < 100:
             logging.error(f"❌ Insufficient data for {symbol} {timeframe}")
             return False
-            
-        # Load sentiment data (optional)
-        sentiment_df = self.load_sentiment(symbol)
-        if not sentiment_df.empty:
-            logging.info(f"🧠 Loaded {len(sentiment_df)} sentiment records")
         
         # Create features
-        df_features = self.create_features(df, sentiment_df)
+        df_features = self.create_features(df)
         if df_features.empty:
             logging.error(f"❌ Failed to create features for {symbol} {timeframe}")
             return False
@@ -388,7 +411,7 @@ class OptimizedCryptoMLSystem:
         return success_price or success_direction or success_gru
     
     def _train_price_models(self, symbol: str, timeframe: str, df: pd.DataFrame) -> bool:
-        """Train price prediction models (regression) with feature selection and hyperparameter tuning"""
+        """Train price prediction models (regression)"""
         logging.info(f"\n📈 Training Price Prediction Models")
         logging.info("-" * 60)
         
@@ -412,240 +435,137 @@ class OptimizedCryptoMLSystem:
         
         logging.info(f"📊 Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
         
-        # ========== FEATURE SELECTION ==========
-        logging.info(f"\n🎯 Selecting top {self.n_features} features using f_regression...")
-        selector = SelectKBest(score_func=f_regression, k=min(self.n_features, len(feature_cols)))
-        X_train_selected = selector.fit_transform(X_train, y_train)
-        X_val_selected = selector.transform(X_val)
-        X_test_selected = selector.transform(X_test)
-        
-        # Get selected feature names
-        selected_mask = selector.get_support()
-        selected_features = [name for name, sel in zip(feature_cols, selected_mask) if sel]
-        
-        logging.info(f"✅ Selected {len(selected_features)} features")
-        logging.info(f"   Top 5: {selected_features[:5]}")
-        
-        # Store feature selector
-        self.feature_selectors[f"{symbol}_{timeframe}_price"] = selector
-        
         # Scale features
         scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train_selected)
-        X_val_scaled = scaler.transform(X_val_selected)
-        X_test_scaled = scaler.transform(X_test_selected)
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_val_scaled = scaler.transform(X_val)
+        X_test_scaled = scaler.transform(X_test)
         
         # Store scaler and feature columns
         self.scalers[f"{symbol}_{timeframe}_price"] = scaler
-        self.feature_columns = selected_features
+        self.feature_columns = feature_cols
         
         models = {}
-        val_scores = {}  # Track validation R² for dynamic weights
         
-        # ========== 1. LightGBM (PRIMARY) ==========
+        # 1. LightGBM (PRIMARY) ⭐⭐⭐⭐⭐
         if LIGHTGBM_AVAILABLE:
             logging.info("\n🌟 Training LightGBM (Primary)...")
-            
-            if self.enable_tuning and OPTUNA_AVAILABLE:
-                logging.info(f"   🔧 Tuning hyperparameters ({self.n_trials} trials)...")
-                
-                def objective(trial):
-                    params = {
-                        'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
-                        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                        'max_depth': trial.suggest_int('max_depth', 3, 12),
-                        'num_leaves': trial.suggest_int('num_leaves', 20, 150),
-                        'min_child_samples': trial.suggest_int('min_child_samples', 10, 50),
-                        'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                        'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 1.0),
-                        'reg_lambda': trial.suggest_float('reg_lambda', 0.0, 2.0),
-                        'random_state': 42,
-                        'verbose': -1,
-                        'force_col_wise': True
-                    }
-                    model = lgb.LGBMRegressor(**params)
-                    model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)],
-                             callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)])
-                    pred_val = model.predict(X_val_scaled)
-                    return r2_score(y_val, pred_val)
-                
-                study = optuna.create_study(direction='maximize', study_name='lgb_price')
-                study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
-                best_params = study.best_params
-                logging.info(f"   ✅ Best R²: {study.best_value:.4f}")
-                lgb_model = lgb.LGBMRegressor(**best_params, verbose=-1, force_col_wise=True)
-            else:
-                lgb_model = lgb.LGBMRegressor(
-                    n_estimators=500, learning_rate=0.05, max_depth=7, num_leaves=31,
-                    min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
-                    reg_alpha=0.1, reg_lambda=0.1, random_state=42, verbose=-1, force_col_wise=True
-                )
-            
-            lgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)],
-                         callbacks=[lgb.early_stopping(100), lgb.log_evaluation(0)])
+            lgb_model = lgb.LGBMRegressor(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=7,
+                num_leaves=31,
+                min_child_samples=20,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                reg_alpha=0.1,
+                reg_lambda=0.1,
+                random_state=42,
+                verbose=-1,
+                force_col_wise=True  # Better for wide datasets
+            )
+            lgb_model.fit(
+                X_train_scaled, y_train,
+                eval_set=[(X_val_scaled, y_val)],
+                callbacks=[lgb.early_stopping(100), lgb.log_evaluation(100)]  # Increased patience
+            )
             models['lightgbm'] = lgb_model
             
             # Evaluate
-            pred_val = lgb_model.predict(X_val_scaled)
-            pred_test = lgb_model.predict(X_test_scaled)
-            r2_val = r2_score(y_val, pred_val)
-            r2_test = r2_score(y_test, pred_test)
-            mse_test = mean_squared_error(y_test, pred_test)
-            direction_acc = (np.sign(pred_test) == np.sign(y_test)).mean()
+            pred_train = lgb_model.predict(X_train_scaled)
+            pred = lgb_model.predict(X_test_scaled)
+            mse = mean_squared_error(y_test, pred)
+            r2 = r2_score(y_test, pred)
+            r2_train = r2_score(y_train, pred_train)
+            direction_acc = (np.sign(pred) == np.sign(y_test)).mean()
             
-            val_scores['lightgbm'] = r2_val
-            logging.info(f"✅ LightGBM - Val R²: {r2_val:.4f}, Test R²: {r2_test:.4f}, MSE: {mse_test:.6f}, Dir Acc: {direction_acc:.2%}")
+            logging.info(f"✅ LightGBM - Train R²: {r2_train:.4f}, Test R²: {r2:.4f}, MSE: {mse:.6f}, Dir Acc: {direction_acc:.2%}")
         
-        # ========== 2. XGBoost (SECONDARY) ==========
+        # 2. XGBoost (SECONDARY) ⭐⭐⭐⭐⭐
         if XGBOOST_AVAILABLE:
             logging.info("\n🔥 Training XGBoost (Secondary)...")
-            
-            if self.enable_tuning and OPTUNA_AVAILABLE:
-                logging.info(f"   🔧 Tuning hyperparameters ({self.n_trials} trials)...")
-                
-                def objective(trial):
-                    params = {
-                        'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
-                        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                        'max_depth': trial.suggest_int('max_depth', 3, 12),
-                        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-                        'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                        'gamma': trial.suggest_float('gamma', 0.0, 1.0),
-                        'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 1.0),
-                        'reg_lambda': trial.suggest_float('reg_lambda', 0.0, 2.0),
-                        'random_state': 42,
-                        'verbosity': 0
-                    }
-                    model = xgb.XGBRegressor(**params)
-                    model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
-                    pred_val = model.predict(X_val_scaled)
-                    return r2_score(y_val, pred_val)
-                
-                study = optuna.create_study(direction='maximize', study_name='xgb_price')
-                study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
-                best_params = study.best_params
-                logging.info(f"   ✅ Best R²: {study.best_value:.4f}")
-                xgb_model = xgb.XGBRegressor(**best_params, verbosity=0)
-            else:
-                xgb_model = xgb.XGBRegressor(
-                    n_estimators=500, learning_rate=0.05, max_depth=6, min_child_weight=3,
-                    subsample=0.8, colsample_bytree=0.8, gamma=0.1,
-                    reg_alpha=0.1, reg_lambda=1.0, random_state=42, verbosity=0
-                )
-            
-            xgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
+            xgb_model = xgb.XGBRegressor(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=6,
+                min_child_weight=3,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                gamma=0.1,
+                reg_alpha=0.1,
+                reg_lambda=1.0,
+                random_state=42,
+                verbosity=0
+            )
+            xgb_model.fit(
+                X_train_scaled, y_train,
+                eval_set=[(X_val_scaled, y_val)],
+                verbose=False
+            )
             models['xgboost'] = xgb_model
             
             # Evaluate
-            pred_val = xgb_model.predict(X_val_scaled)
-            pred_test = xgb_model.predict(X_test_scaled)
-            r2_val = r2_score(y_val, pred_val)
-            r2_test = r2_score(y_test, pred_test)
-            mse_test = mean_squared_error(y_test, pred_test)
-            direction_acc = (np.sign(pred_test) == np.sign(y_test)).mean()
+            pred = xgb_model.predict(X_test_scaled)
+            mse = mean_squared_error(y_test, pred)
+            r2 = r2_score(y_test, pred)
+            direction_acc = (np.sign(pred) == np.sign(y_test)).mean()
             
-            val_scores['xgboost'] = r2_val
-            logging.info(f"✅ XGBoost - Val R²: {r2_val:.4f}, Test R²: {r2_test:.4f}, MSE: {mse_test:.6f}, Dir Acc: {direction_acc:.2%}")
+            logging.info(f"✅ XGBoost - MSE: {mse:.6f}, R²: {r2:.4f}, Dir Acc: {direction_acc:.2%}")
         
-        # ========== 3. CatBoost (TERTIARY) ==========
+        # 3. CatBoost (TERTIARY) ⭐⭐⭐⭐
         if CATBOOST_AVAILABLE:
             logging.info("\n🐱 Training CatBoost (Tertiary)...")
             
-            if self.enable_tuning and OPTUNA_AVAILABLE:
-                logging.info(f"   🔧 Tuning hyperparameters ({self.n_trials} trials)...")
-                
-                def objective(trial):
-                    params = {
-                        'iterations': trial.suggest_int('iterations', 100, 1000),
-                        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                        'depth': trial.suggest_int('depth', 3, 10),
-                        'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1.0, 10.0),
-                        'random_seed': 42,
-                        'verbose': False
-                    }
-                    model = cb.CatBoostRegressor(**params)
-                    model.fit(X_train_scaled, y_train, eval_set=(X_val_scaled, y_val),
-                             early_stopping_rounds=50, verbose=False)
-                    pred_val = model.predict(X_val_scaled)
-                    return r2_score(y_val, pred_val)
-                
-                study = optuna.create_study(direction='maximize', study_name='cb_price')
-                study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
-                best_params = study.best_params
-                logging.info(f"   ✅ Best R²: {study.best_value:.4f}")
-                cb_model = cb.CatBoostRegressor(**best_params, verbose=False)
-            else:
-                cb_model = cb.CatBoostRegressor(
-                    iterations=500, learning_rate=0.05, depth=6, l2_leaf_reg=3,
-                    random_seed=42, verbose=False
-                )
+            # Simplified: Use scaled data like other models
+            # CatBoost is robust enough to work without explicit categorical features
+            cb_model = cb.CatBoostRegressor(
+                iterations=500,
+                learning_rate=0.05,
+                depth=6,
+                l2_leaf_reg=3,
+                random_seed=42,
+                verbose=False
+            )
             
-            cb_model.fit(X_train_scaled, y_train, eval_set=(X_val_scaled, y_val),
-                        early_stopping_rounds=50, verbose=False)
+            cb_model.fit(
+                X_train_scaled, y_train,
+                eval_set=(X_val_scaled, y_val),
+                early_stopping_rounds=50,
+                verbose=False
+            )
             models['catboost'] = cb_model
             
             # Evaluate
-            pred_val = cb_model.predict(X_val_scaled)
-            pred_test = cb_model.predict(X_test_scaled)
-            r2_val = r2_score(y_val, pred_val)
-            r2_test = r2_score(y_test, pred_test)
-            mse_test = mean_squared_error(y_test, pred_test)
-            direction_acc = (np.sign(pred_test) == np.sign(y_test)).mean()
+            pred = cb_model.predict(X_test_scaled)
+            mse = mean_squared_error(y_test, pred)
+            r2 = r2_score(y_test, pred)
+            direction_acc = (np.sign(pred) == np.sign(y_test)).mean()
             
-            val_scores['catboost'] = r2_val
-            logging.info(f"✅ CatBoost - Val R²: {r2_val:.4f}, Test R²: {r2_test:.4f}, MSE: {mse_test:.6f}, Dir Acc: {direction_acc:.2%}")
-        
-        # ========== CALCULATE DYNAMIC WEIGHTS ==========
-        if val_scores:
-            # Use softmax to convert R² scores to weights
-            scores_array = np.array(list(val_scores.values()))
-            # Clip negative R² to 0
-            scores_array = np.maximum(scores_array, 0)
-            # Apply softmax with temperature
-            exp_scores = np.exp(scores_array * 5)  # Temperature = 5 to amplify differences
-            dynamic_weights = exp_scores / exp_scores.sum()
-            
-            weight_dict = {name: float(weight) for name, weight in zip(val_scores.keys(), dynamic_weights)}
-            self.model_performance[f"{symbol}_{timeframe}_price"] = {
-                'val_scores': val_scores,
-                'dynamic_weights': weight_dict
-            }
-            
-            logging.info(f"\n⚖️  Dynamic Weights (based on validation R²):")
-            for name, weight in weight_dict.items():
-                logging.info(f"   {name}: {weight:.2%} (R²: {val_scores[name]:.4f})")
+            logging.info(f"✅ CatBoost - MSE: {mse:.6f}, R²: {r2:.4f}, Dir Acc: {direction_acc:.2%}")
         
         # Save all models
         for model_name, model in models.items():
+            # Replace / with _ for safe filenames
             safe_symbol = symbol.replace('/', '_')
             model_path = f"ml_models/{safe_symbol}_{timeframe}_price_{model_name}.joblib"
             joblib.dump(model, model_path)
             self.models[f"{symbol}_{timeframe}_price_{model_name}"] = model
             logging.info(f"💾 Saved: {model_path}")
         
-        # Save scaler, selector, and feature columns
+        # Save scaler
         safe_symbol = symbol.replace('/', '_')
         scaler_path = f"ml_models/{safe_symbol}_{timeframe}_price_scaler.joblib"
         joblib.dump(scaler, scaler_path)
         
-        selector_path = f"ml_models/{safe_symbol}_{timeframe}_price_selector.joblib"
-        joblib.dump(selector, selector_path)
-        
+        # Save feature columns
         features_path = f"ml_models/{safe_symbol}_{timeframe}_price_features.joblib"
-        joblib.dump(selected_features, features_path)
-        
-        # Save performance metrics
-        perf_path = f"ml_models/{safe_symbol}_{timeframe}_price_performance.joblib"
-        joblib.dump(self.model_performance.get(f"{symbol}_{timeframe}_price", {}), perf_path)
+        joblib.dump(feature_cols, features_path)
         
         logging.info(f"\n✅ Price models trained successfully!")
         return len(models) > 0
-
     
     def _train_direction_models(self, symbol: str, timeframe: str, df: pd.DataFrame) -> bool:
-        """Train direction prediction models (classification) with feature selection and hyperparameter tuning"""
+        """Train direction prediction models (classification)"""
         logging.info(f"\n🎯 Training Direction Prediction Models")
         logging.info("-" * 60)
         
@@ -667,205 +587,94 @@ class OptimizedCryptoMLSystem:
         X_test = X[val_size:]
         y_test = y[val_size:]
         
-        logging.info(f"📊 Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
-        
-        # ========== FEATURE SELECTION ==========
-        logging.info(f"\n🎯 Selecting top {self.n_features} features using mutual_info_classif...")
-        selector = SelectKBest(score_func=mutual_info_classif, k=min(self.n_features, len(feature_cols)))
-        X_train_selected = selector.fit_transform(X_train, y_train)
-        X_val_selected = selector.transform(X_val)
-        X_test_selected = selector.transform(X_test)
-        
-        # Get selected feature names
-        selected_mask = selector.get_support()
-        selected_features = [name for name, sel in zip(feature_cols, selected_mask) if sel]
-        
-        logging.info(f"✅ Selected {len(selected_features)} features")
-        logging.info(f"   Top 5: {selected_features[:5]}")
-        
-        # Store feature selector
-        self.feature_selectors[f"{symbol}_{timeframe}_direction"] = selector
-        
         # Scale features
         scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train_selected)
-        X_val_scaled = scaler.transform(X_val_selected)
-        X_test_scaled = scaler.transform(X_test_selected)
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_val_scaled = scaler.transform(X_val)
+        X_test_scaled = scaler.transform(X_test)
         
         # Store scaler
         self.scalers[f"{symbol}_{timeframe}_direction"] = scaler
         
         models = {}
-        val_scores = {}  # Track validation accuracy for dynamic weights
         
-        # ========== 1. LightGBM Classifier ==========
+        # 1. LightGBM Classifier
         if LIGHTGBM_AVAILABLE:
             logging.info("\n🌟 Training LightGBM Classifier...")
-            
-            if self.enable_tuning and OPTUNA_AVAILABLE:
-                logging.info(f"   🔧 Tuning hyperparameters ({self.n_trials} trials)...")
-                
-                def objective(trial):
-                    params = {
-                        'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
-                        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                        'max_depth': trial.suggest_int('max_depth', 3, 12),
-                        'num_leaves': trial.suggest_int('num_leaves', 20, 150),
-                        'min_child_samples': trial.suggest_int('min_child_samples', 10, 50),
-                        'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                        'random_state': 42,
-                        'verbose': -1
-                    }
-                    model = lgb.LGBMClassifier(**params)
-                    model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)],
-                             callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)])
-                    pred_val = model.predict(X_val_scaled)
-                    return accuracy_score(y_val, pred_val)
-                
-                study = optuna.create_study(direction='maximize', study_name='lgb_direction')
-                study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
-                best_params = study.best_params
-                logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
-                lgb_model = lgb.LGBMClassifier(**best_params, verbose=-1)
-            else:
-                lgb_model = lgb.LGBMClassifier(
-                    n_estimators=500, learning_rate=0.05, max_depth=7, num_leaves=31,
-                    min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
-                    random_state=42, verbose=-1
-                )
-            
-            lgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)],
-                         callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)])
+            lgb_model = lgb.LGBMClassifier(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=7,
+                num_leaves=31,
+                min_child_samples=20,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                verbose=-1
+            )
+            lgb_model.fit(
+                X_train_scaled, y_train,
+                eval_set=[(X_val_scaled, y_val)],
+                callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)]
+            )
             models['lightgbm'] = lgb_model
             
             # Evaluate
-            pred_val = lgb_model.predict(X_val_scaled)
-            pred_test = lgb_model.predict(X_test_scaled)
-            acc_val = accuracy_score(y_val, pred_val)
-            acc_test = accuracy_score(y_test, pred_test)
-            prec = precision_score(y_test, pred_test, zero_division=0)
-            rec = recall_score(y_test, pred_test, zero_division=0)
-            f1 = f1_score(y_test, pred_test, zero_division=0)
-            
-            val_scores['lightgbm'] = acc_val
-            logging.info(f"✅ LightGBM - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}, F1: {f1:.2%}")
+            pred = lgb_model.predict(X_test_scaled)
+            acc = accuracy_score(y_test, pred)
+            logging.info(f"✅ LightGBM - Accuracy: {acc:.2%}")
         
-        # ========== 2. XGBoost Classifier ==========
+        # 2. XGBoost Classifier
         if XGBOOST_AVAILABLE:
             logging.info("\n🔥 Training XGBoost Classifier...")
-            
-            if self.enable_tuning and OPTUNA_AVAILABLE:
-                logging.info(f"   🔧 Tuning hyperparameters ({self.n_trials} trials)...")
-                
-                def objective(trial):
-                    params = {
-                        'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
-                        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                        'max_depth': trial.suggest_int('max_depth', 3, 12),
-                        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-                        'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                        'random_state': 42,
-                        'verbosity': 0
-                    }
-                    model = xgb.XGBClassifier(**params)
-                    model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
-                    pred_val = model.predict(X_val_scaled)
-                    return accuracy_score(y_val, pred_val)
-                
-                study = optuna.create_study(direction='maximize', study_name='xgb_direction')
-                study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
-                best_params = study.best_params
-                logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
-                xgb_model = xgb.XGBClassifier(**best_params, verbosity=0)
-            else:
-                xgb_model = xgb.XGBClassifier(
-                    n_estimators=500, learning_rate=0.05, max_depth=6, min_child_weight=3,
-                    subsample=0.8, colsample_bytree=0.8, random_state=42, verbosity=0
-                )
-            
-            xgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
+            xgb_model = xgb.XGBClassifier(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=6,
+                min_child_weight=3,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                verbosity=0
+            )
+            xgb_model.fit(
+                X_train_scaled, y_train,
+                eval_set=[(X_val_scaled, y_val)],
+                verbose=False
+            )
             models['xgboost'] = xgb_model
             
             # Evaluate
-            pred_val = xgb_model.predict(X_val_scaled)
-            pred_test = xgb_model.predict(X_test_scaled)
-            acc_val = accuracy_score(y_val, pred_val)
-            acc_test = accuracy_score(y_test, pred_test)
-            prec = precision_score(y_test, pred_test, zero_division=0)
-            rec = recall_score(y_test, pred_test, zero_division=0)
-            f1 = f1_score(y_test, pred_test, zero_division=0)
-            
-            val_scores['xgboost'] = acc_val
-            logging.info(f"✅ XGBoost - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}, F1: {f1:.2%}")
+            pred = xgb_model.predict(X_test_scaled)
+            acc = accuracy_score(y_test, pred)
+            logging.info(f"✅ XGBoost - Accuracy: {acc:.2%}")
         
-        # ========== 3. CatBoost Classifier ==========
+        # 3. CatBoost Classifier
         if CATBOOST_AVAILABLE:
             logging.info("\n🐱 Training CatBoost Classifier...")
             
-            if self.enable_tuning and OPTUNA_AVAILABLE:
-                logging.info(f"   🔧 Tuning hyperparameters ({self.n_trials} trials)...")
-                
-                def objective(trial):
-                    params = {
-                        'iterations': trial.suggest_int('iterations', 100, 1000),
-                        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                        'depth': trial.suggest_int('depth', 3, 10),
-                        'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1.0, 10.0),
-                        'random_seed': 42,
-                        'verbose': False
-                    }
-                    model = cb.CatBoostClassifier(**params)
-                    model.fit(X_train_scaled, y_train, eval_set=(X_val_scaled, y_val),
-                             early_stopping_rounds=50, verbose=False)
-                    pred_val = model.predict(X_val_scaled)
-                    return accuracy_score(y_val, pred_val)
-                
-                study = optuna.create_study(direction='maximize', study_name='cb_direction')
-                study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
-                best_params = study.best_params
-                logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
-                cb_model = cb.CatBoostClassifier(**best_params, verbose=False)
-            else:
-                cb_model = cb.CatBoostClassifier(
-                    iterations=500, learning_rate=0.05, depth=6, l2_leaf_reg=3,
-                    random_seed=42, verbose=False
-                )
+            # Simplified: Use scaled data like other models
+            cb_model = cb.CatBoostClassifier(
+                iterations=500,
+                learning_rate=0.05,
+                depth=6,
+                l2_leaf_reg=3,
+                random_seed=42,
+                verbose=False
+            )
             
-            cb_model.fit(X_train_scaled, y_train, eval_set=(X_val_scaled, y_val),
-                        early_stopping_rounds=50, verbose=False)
+            cb_model.fit(
+                X_train_scaled, y_train,
+                eval_set=(X_val_scaled, y_val),
+                early_stopping_rounds=50,
+                verbose=False
+            )
             models['catboost'] = cb_model
             
             # Evaluate
-            pred_val = cb_model.predict(X_val_scaled)
-            pred_test = cb_model.predict(X_test_scaled)
-            acc_val = accuracy_score(y_val, pred_val)
-            acc_test = accuracy_score(y_test, pred_test)
-            prec = precision_score(y_test, pred_test, zero_division=0)
-            rec = recall_score(y_test, pred_test, zero_division=0)
-            f1 = f1_score(y_test, pred_test, zero_division=0)
-            
-            val_scores['catboost'] = acc_val
-            logging.info(f"✅ CatBoost - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}, F1: {f1:.2%}")
-        
-        # ========== CALCULATE DYNAMIC WEIGHTS ==========
-        if val_scores:
-            # Use softmax to convert accuracy scores to weights
-            scores_array = np.array(list(val_scores.values()))
-            # Apply softmax with temperature
-            exp_scores = np.exp(scores_array * 10)  # Temperature = 10 for classification
-            dynamic_weights = exp_scores / exp_scores.sum()
-            
-            weight_dict = {name: float(weight) for name, weight in zip(val_scores.keys(), dynamic_weights)}
-            self.model_performance[f"{symbol}_{timeframe}_direction"] = {
-                'val_scores': val_scores,
-                'dynamic_weights': weight_dict
-            }
-            
-            logging.info(f"\n⚖️  Dynamic Weights (based on validation accuracy):")
-            for name, weight in weight_dict.items():
-                logging.info(f"   {name}: {weight:.2%} (Acc: {val_scores[name]:.2%})")
+            pred = cb_model.predict(X_test_scaled)
+            acc = accuracy_score(y_test, pred)
+            logging.info(f"✅ CatBoost - Accuracy: {acc:.2%}")
         
         # Save all models
         for model_name, model in models.items():
@@ -875,23 +684,13 @@ class OptimizedCryptoMLSystem:
             self.models[f"{symbol}_{timeframe}_direction_{model_name}"] = model
             logging.info(f"💾 Saved: {model_path}")
         
-        # Save scaler, selector, and performance metrics
+        # Save scaler
         safe_symbol = symbol.replace('/', '_')
         scaler_path = f"ml_models/{safe_symbol}_{timeframe}_direction_scaler.joblib"
         joblib.dump(scaler, scaler_path)
         
-        selector_path = f"ml_models/{safe_symbol}_{timeframe}_direction_selector.joblib"
-        joblib.dump(selector, selector_path)
-        
-        features_path = f"ml_models/{safe_symbol}_{timeframe}_direction_features.joblib"
-        joblib.dump(selected_features, features_path)
-        
-        perf_path = f"ml_models/{safe_symbol}_{timeframe}_direction_performance.joblib"
-        joblib.dump(self.model_performance.get(f"{symbol}_{timeframe}_direction", {}), perf_path)
-        
         logging.info(f"\n✅ Direction models trained successfully!")
         return len(models) > 0
-
     
     def _train_gru_model(self, symbol: str, timeframe: str, df: pd.DataFrame) -> bool:
         """Train GRU model for time series (4h timeframe only)"""
@@ -976,281 +775,242 @@ class OptimizedCryptoMLSystem:
         return True
     
     def make_ensemble_prediction(self, symbol: str, timeframe: str) -> Dict:
-        """
-        Make ensemble predictions combining all models
-        
-        Weights by timeframe (OPTIMIZED - Priority 1):
-        - 1h: 50% LightGBM, 30% XGBoost, 20% CatBoost
-        - 4h: 45% LightGBM, 30% XGBoost, 15% CatBoost, 10% GRU
-        """
-        logging.info(f"\n{'='*60}")
-        logging.info(f"🔮 Ensemble Prediction: {symbol} {timeframe}")
-        logging.info(f"{'='*60}\n")
-        
-        # PRIORITY 1 FIX: Adaptive lookback based on timeframe
-        lookback_map = {
-            '5m': 1, '15m': 1, '1h': 2, '4h': 3, '1d': 6
-        }
-        months_back = lookback_map.get(timeframe, 1)
-        logging.info(f"📅 Using {months_back} months lookback for {timeframe}")
-        
-        # Load recent data with appropriate lookback
-        df = self.load_data(symbol, timeframe, months_back=months_back)
-        if df.empty or len(df) < 50:
-            logging.error("❌ Insufficient data for prediction")
-            return {}
-        
-        # Create features
-        df_features = self.create_features(df)
-        if df_features.empty:
-            logging.error("❌ Failed to create features")
-            return {}
-        
-        predictions = {
-            'symbol': symbol,
-            'timeframe': timeframe,
-            'timestamp': datetime.now().isoformat(),
-            'current_price': float(df['close'].iloc[-1]),
-            'model_predictions': {}
-        }
-        
-        # Load models
-        self._load_models(symbol, timeframe)
-        
-        # Get latest features for tabular models
-        exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'target']
-        available_features = [col for col in df_features.columns if col not in exclude_cols]
-        
-        if not available_features:
-            logging.error("❌ No features available")
-            return predictions
-        
-        X_latest = df_features[available_features].iloc[-1:].values
-        
-        if f"{symbol}_{timeframe}_price" in self.model_performance:
-            perf_data = self.model_performance[f"{symbol}_{timeframe}_price"]
-            if 'dynamic_weights' in perf_data:
-                logging.info(f"⚖️ Using dynamic weights for price: {perf_data['dynamic_weights']}")
-                # Merge dynamic weights with existing keys to ensure we have all required models
-                # (Dynamic weights might only contain valid ones, but we need structure)
-                for k, v in perf_data['dynamic_weights'].items():
-                    weight_config[k] = v
-
-        if timeframe == '4h' and 'gru' not in weight_config:
-             # Ensure GRU has a weight if not dynamically tuned (or if tuning excluded it)
-             weight_config['gru'] = 0.10
-
-        # 1. Price predictions (Regression)
-        price_preds = []
-        price_weights = []
-        
-        # Get price scaler and selector
-        selector_price = self.feature_selectors.get(f"{symbol}_{timeframe}_price")
-        scaler_price = self.scalers.get(f"{symbol}_{timeframe}_price")
-        
-        if selector_price and scaler_price:
-            try:
-                # Transform features: Selection then Scaling
-                X_selected = selector_price.transform(X_latest)
-                X_scaled = scaler_price.transform(X_selected)
-                
-                # LightGBM Price
-                if f"{symbol}_{timeframe}_price_lightgbm" in self.models:
+            """
+            Make ensemble predictions combining all models
+            
+            Weights by timeframe (OPTIMIZED - Priority 1):
+            - 1h: 50% LightGBM, 30% XGBoost, 20% CatBoost
+            - 4h: 45% LightGBM, 30% XGBoost, 15% CatBoost, 10% GRU
+            """
+            logging.info(f"\n{'='*60}")
+            logging.info(f"🔮 Ensemble Prediction: {symbol} {timeframe}")
+            logging.info(f"{'='*60}\n")
+            
+            # PRIORITY 1 FIX: Adaptive lookback based on timeframe
+            lookback_map = {
+                '5m': 1, '15m': 1, '1h': 2, '4h': 3, '1d': 6
+            }
+            months_back = lookback_map.get(timeframe, 1)
+            logging.info(f"📅 Using {months_back} months lookback for {timeframe}")
+            
+            # Load recent data with appropriate lookback
+            df = self.load_data(symbol, timeframe, months_back=months_back)
+            if df.empty or len(df) < 50:
+                logging.error("❌ Insufficient data for prediction")
+                return {}
+            
+            # Create features
+            df_features = self.create_features(df)
+            if df_features.empty:
+                logging.error("❌ Failed to create features")
+                return {}
+            
+            predictions = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'timestamp': datetime.now().isoformat(),
+                'current_price': float(df['close'].iloc[-1])
+            }
+            
+            # Load models
+            self._load_models(symbol, timeframe)
+            
+            # Get latest features
+            exclude_cols = ['open', 'high', 'low', 'close', 'volume']
+            available_features = [col for col in df_features.columns if col not in exclude_cols]
+            
+            if not available_features:
+                logging.error("❌ No features available")
+                return predictions
+            
+            X_latest = df_features[available_features].iloc[-1:].values
+            
+            # PRIORITY 1 FIX: Optimized ensemble weights
+            if timeframe == '4h':
+                weight_config = {'lightgbm': 0.45, 'xgboost': 0.30, 'catboost': 0.15, 'gru': 0.10}
+            else:
+                weight_config = {'lightgbm': 0.50, 'xgboost': 0.30, 'catboost': 0.20}
+            
+            # ===== NEW: Store individual model predictions =====
+            model_predictions = {}
+            
+            # Price predictions
+            price_preds = []
+            price_weights = []
+            
+            # LightGBM
+            if f"{symbol}_{timeframe}_price_lightgbm" in self.models:
+                scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
+                if scaler is not None:
+                    X_scaled = scaler.transform(X_latest)
                     pred = self.models[f"{symbol}_{timeframe}_price_lightgbm"].predict(X_scaled)[0]
                     price_preds.append(pred)
-                    weight = weight_config.get('lightgbm', 0.33)
-                    price_weights.append(weight)
-                    predictions['model_predictions']['lightgbm'] = {
+                    price_weights.append(weight_config['lightgbm'])
+                    logging.info(f"📊 LightGBM price: {pred:+.4%} (weight: {weight_config['lightgbm']:.0%})")
+                    
+                    # Store individual prediction
+                    model_predictions['lightgbm'] = {
                         'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
                         'price_change_pct': float(pred),
-                        'confidence': float(weight)
+                        'confidence': float(weight_config['lightgbm'])
                     }
-                    logging.debug(f"📊 LightGBM price: {pred:+.4%}")
-                
-                # XGBoost Price
-                if f"{symbol}_{timeframe}_price_xgboost" in self.models:
+            
+            # XGBoost
+            if f"{symbol}_{timeframe}_price_xgboost" in self.models:
+                scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
+                if scaler is not None:
+                    X_scaled = scaler.transform(X_latest)
                     pred = self.models[f"{symbol}_{timeframe}_price_xgboost"].predict(X_scaled)[0]
                     price_preds.append(pred)
-                    weight = weight_config.get('xgboost', 0.33)
-                    price_weights.append(weight)
-                    predictions['model_predictions']['xgboost'] = {
+                    price_weights.append(weight_config['xgboost'])
+                    logging.info(f"📊 XGBoost price: {pred:+.4%} (weight: {weight_config['xgboost']:.0%})")
+                    
+                    # Store individual prediction
+                    model_predictions['xgboost'] = {
                         'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
                         'price_change_pct': float(pred),
-                        'confidence': float(weight)
+                        'confidence': float(weight_config['xgboost'])
                     }
-                    logging.debug(f"📊 XGBoost price: {pred:+.4%}")
-                
-                # CatBoost Price
-                if f"{symbol}_{timeframe}_price_catboost" in self.models:
+            
+            # CatBoost
+            if f"{symbol}_{timeframe}_price_catboost" in self.models:
+                scaler = self.scalers.get(f"{symbol}_{timeframe}_price")
+                if scaler is not None:
+                    X_scaled = scaler.transform(X_latest)
                     pred = self.models[f"{symbol}_{timeframe}_price_catboost"].predict(X_scaled)[0]
                     price_preds.append(pred)
-                    weight = weight_config.get('catboost', 0.33)
-                    price_weights.append(weight)
-                    predictions['model_predictions']['catboost'] = {
+                    price_weights.append(weight_config['catboost'])
+                    logging.info(f"📊 CatBoost price: {pred:+.4%} (weight: {weight_config['catboost']:.0%})")
+                    
+                    # Store individual prediction
+                    model_predictions['catboost'] = {
                         'predicted_price': float(df['close'].iloc[-1] * (1 + pred)),
                         'price_change_pct': float(pred),
-                        'confidence': float(weight)
+                        'confidence': float(weight_config['catboost'])
                     }
-                    logging.debug(f"📊 CatBoost price: {pred:+.4%}")
-            except Exception as e:
-                logging.error(f"⚠️ Price model prediction failed: {e}")
-        
-        # GRU (4h only)
-        if timeframe == '4h' and f"{symbol}_{timeframe}_gru" in self.models:
-            self._predict_gru_price(df, symbol, timeframe, price_preds, price_weights, weight_config, predictions['model_predictions'])
-
-        # Calculate ensemble price prediction
-        if price_preds:
-            total_weight = sum(price_weights)
-            normalized_weights = [w/total_weight for w in price_weights]
-            ensemble_price_change = sum(p * w for p, w in zip(price_preds, normalized_weights))
             
-            # Clip unrealistic predictions
-            prediction_limits = {'5m': 0.02, '15m': 0.03, '1h': 0.05, '4h': 0.10, '1d': 0.15}
-            max_change = prediction_limits.get(timeframe, 0.05)
-            ensemble_price_change = np.clip(ensemble_price_change, -max_change, max_change)
+            # GRU (4h only)
+            if timeframe == '4h' and f"{symbol}_{timeframe}_gru" in self.models:
+                sequence_length = 60
+                if len(df) >= sequence_length:
+                    scaler = self.scalers.get(f"{symbol}_{timeframe}_gru")
+                    if scaler is not None:
+                        prices = df['close'].values[-sequence_length:].reshape(-1, 1)
+                        scaled_prices = scaler.transform(prices)
+                        X_gru = scaled_prices.reshape(1, sequence_length, 1)
+                        
+                        try:
+                            gru_pred_scaled = self.models[f"{symbol}_{timeframe}_gru"].predict(X_gru, verbose=0)[0][0]
+                            gru_pred_price = scaler.inverse_transform([[gru_pred_scaled]])[0][0]
+                            gru_pred_change = gru_pred_price / df['close'].iloc[-1] - 1
+                            
+                            price_preds.append(gru_pred_change)
+                            price_weights.append(weight_config.get('gru', 0.10))
+                            logging.info(f"🧠 GRU price: {gru_pred_change:+.4%} (weight: {weight_config.get('gru', 0.10):.0%})")
+                            
+                            # Store individual prediction
+                            model_predictions['gru'] = {
+                                'predicted_price': float(gru_pred_price),
+                                'price_change_pct': float(gru_pred_change),
+                                'confidence': float(weight_config.get('gru', 0.10))
+                            }
+                        except Exception as e:
+                            logging.warning(f"⚠️ GRU prediction failed: {e}")
             
-            predictions['price_change_pct'] = float(ensemble_price_change * 100)
-            predictions['predicted_price'] = float(df['close'].iloc[-1] * (1 + ensemble_price_change))
-            
-        # 2. Direction predictions (Soft Voting Implementation)
-        direction_probs = []
-        direction_weights = []
-        
-        # Dynamic weights for direction
-        dir_weight_config = weight_config.copy() # Default to fallback
-        if f"{symbol}_{timeframe}_direction" in self.model_performance:
-             perf_data = self.model_performance[f"{symbol}_{timeframe}_direction"]
-             if 'dynamic_weights' in perf_data:
-                logging.info(f"⚖️ Using dynamic weights for direction: {perf_data['dynamic_weights']}")
-                for k, v in perf_data['dynamic_weights'].items():
-                    dir_weight_config[k] = v
-
-        # Get direction selector
-        selector_dir = self.feature_selectors.get(f"{symbol}_{timeframe}_direction")
-        
-        # Breakdown to be populated by _get_model_prob or manually here
-        predictions['model_breakdown'] = {}
-
-        if selector_dir:
-            try:
-                # Transform features using selector
-                X_dir_selected = selector_dir.transform(X_latest)
+            # Calculate ensemble price prediction
+            if price_preds:
+                # Normalize weights
+                total_weight = sum(price_weights)
+                normalized_weights = [w/total_weight for w in price_weights]
                 
-                # Get probabilities from each model
-                for model_name in ['lightgbm', 'xgboost', 'catboost']:
-                     prob = self._get_model_prob(symbol, timeframe, model_name, X_dir_selected, direction_probs, direction_weights, dir_weight_config)
-                     if prob is not None:
-                         predictions['model_breakdown'][model_name] = {
-                             'weight': float(dir_weight_config.get(model_name, 0)),
-                             'probability_up': float(prob),
-                             'prediction': 'UP' if prob > 0.5 else 'DOWN'
-                         }
-
-            except Exception as e:
-                logging.error(f"⚠️ Direction model prediction failed: {e}")
-            
-        # Calculate weighted probability
-        if direction_probs:
-            total_dir_weight = sum(direction_weights)
-            norm_dir_weights = [w/total_dir_weight for w in direction_weights]
-            
-            # direction_probs contains computed probability of class 1 (UP)
-            weighted_prob_up = sum(p * w for p, w in zip(direction_probs, norm_dir_weights))
-            
-            if weighted_prob_up > 0.55: # Threshold for UP
-                predictions['direction'] = 'UP'
-                combined_conf = (weighted_prob_up - 0.5) * 2 # Scale 0.5-1.0 to 0.0-1.0
-            elif weighted_prob_up < 0.45: # Threshold for DOWN
-                predictions['direction'] = 'DOWN'
-                combined_conf = (0.5 - weighted_prob_up) * 2
-            else:
-                predictions['direction'] = 'NEUTRAL'
-                combined_conf = 0.0
+                ensemble_price_change = sum(p * w for p, w in zip(price_preds, normalized_weights))
                 
-            predictions['direction_confidence'] = float(combined_conf)
-            predictions['confidence'] = float(combined_conf) # Main confidence is now strictly model probability based
+                # PRIORITY 1 FIX: Clip unrealistic predictions
+                prediction_limits = {
+                    '5m': 0.02, '15m': 0.03, '1h': 0.05, '4h': 0.10, '1d': 0.15
+                }
+                max_change = prediction_limits.get(timeframe, 0.05)
+                original_pred = ensemble_price_change
+                ensemble_price_change = np.clip(ensemble_price_change, -max_change, max_change)
+                
+                if abs(original_pred) != abs(ensemble_price_change):
+                    logging.warning(f"⚠️ Clipped prediction from {original_pred:+.4%} to {ensemble_price_change:+.4%}")
+                
+                predictions['price_change_pct'] = float(ensemble_price_change * 100)
+                predictions['predicted_price'] = float(df['close'].iloc[-1] * (1 + ensemble_price_change))
+                
+                logging.info(f"\n💡 Ensemble Price Change: {ensemble_price_change:+.4%}")
+                logging.info(f"💰 Predicted Price: ${predictions['predicted_price']:.2f}")
             
-            logging.info(f"🎯 Ensemble Direction: {predictions['direction']} (Prob UP: {weighted_prob_up:.2%}, Conf: {combined_conf:.2%})")
-
-        logging.info(f"✅ Ensemble prediction complete!\n")
-        return predictions
-
-    def _get_model_prob(self, symbol, timeframe, model_name, X_latest_selected, probs_list, weights_list, weight_config):
-        """Helper to get probability from a specific model"""
-        model_key = f"{symbol}_{timeframe}_direction_{model_name}"
-        if model_key in self.models:
-            scaler = self.scalers.get(f"{symbol}_{timeframe}_direction")
-            if scaler is not None:
-                # Expects feature-selected input
-                X_scaled = scaler.transform(X_latest_selected)
-                # predict_proba returns [prob_class_0, prob_class_1]
-                prob_up = self.models[model_key].predict_proba(X_scaled)[0][1]
-                probs_list.append(prob_up)
-                weights_list.append(weight_config.get(model_name, 0.33))
-                return prob_up
-        return None
-
-    def _predict_gru_price(self, df, symbol, timeframe, price_preds, price_weights, weight_config, model_predictions=None):
-        """Helper for GRU prediction to keep main method clean"""
-        sequence_length = 60
-        if len(df) >= sequence_length:
-            scaler = self.scalers.get(f"{symbol}_{timeframe}_gru")
-            if scaler is not None:
-                try:
-                    prices = df['close'].values[-sequence_length:].reshape(-1, 1)
-                    scaled_prices = scaler.transform(prices)
-                    X_gru = scaled_prices.reshape(1, sequence_length, 1)
-                    
-                    gru_pred_scaled = self.models[f"{symbol}_{timeframe}_gru"].predict(X_gru, verbose=0)[0][0]
-                    gru_pred_price = scaler.inverse_transform([[gru_pred_scaled]])[0][0]
-                    gru_pred_change = gru_pred_price / df['close'].iloc[-1] - 1
-                    
-                    price_preds.append(gru_pred_change)
-                    weight = weight_config.get('gru', 0.10)
-                    price_weights.append(weight)
-                    
-                    if model_predictions is not None:
-                        model_predictions['gru'] = {
-                            'predicted_price': float(gru_pred_price),
-                            'price_change_pct': float(gru_pred_change),
-                            'confidence': float(weight)
-                        }
-                except Exception as e:
-                    logging.warning(f"⚠️ GRU prediction failed: {e}")
+            # Direction predictions
+            direction_votes = {'UP': 0, 'DOWN': 0}
+            
+            # All models use scaled data
+            for model_type in ['lightgbm', 'xgboost', 'catboost']:
+                model_key = f"{symbol}_{timeframe}_direction_{model_type}"
+                if model_key in self.models:
+                    scaler = self.scalers.get(f"{symbol}_{timeframe}_direction")
+                    if scaler is not None:
+                        X_scaled = scaler.transform(X_latest)
+                        direction_pred = self.models[model_key].predict(X_scaled)[0]
+                        direction_votes['UP' if direction_pred == 1 else 'DOWN'] += 1
+            
+            if sum(direction_votes.values()) > 0:
+                predictions['direction'] = max(direction_votes, key=direction_votes.get)
+                predictions['direction_confidence'] = direction_votes[predictions['direction']] / sum(direction_votes.values())
+                
+                # Use improved confidence calculation
+                predictions['confidence'] = self.calculate_confidence(price_preds, direction_votes)
+                
+                logging.info(f"📊 Confidence: {predictions['confidence']:.2%}")
+                logging.info(f"🎯 Direction: {predictions['direction']} (confidence: {predictions['direction_confidence']:.2%})")
+            
+            # ===== NEW: Add model predictions to return value =====
+            predictions['model_predictions'] = model_predictions
+            
+            logging.info(f"\n✅ Ensemble prediction complete!\n")
+            return predictions
     
     def calculate_confidence(self, price_preds: list, direction_votes: dict) -> float:
         """
-        Legacy method kept for interface compatibility, but logic moved to probability-based approach above.
+        Calculate prediction confidence based on model agreement
+        
+        PRIORITY 1 FIX: Improved confidence scoring
+        
+        Args:
+            price_preds: List of price predictions from models
+            direction_votes: Dictionary of direction votes
+        
+        Returns:
+            Confidence score between 0 and 0.95
         """
-        return 0.0
+        # Direction agreement component
+        total_votes = sum(direction_votes.values())
+        if total_votes == 0:
+            direction_confidence = 0.5
+        else:
+            max_votes = max(direction_votes.values())
+            direction_confidence = max_votes / total_votes
+        
+        # Price prediction variance component
+        if len(price_preds) > 0:
+            std = np.std(price_preds)
+            variance_confidence = 1.0 / (1.0 + std * 100)
+        else:
+            variance_confidence = 0.5
+        
+        # Combined confidence (70% direction, 30% variance)
+        confidence = (direction_confidence * 0.7 + variance_confidence * 0.3)
+        
+        return float(np.clip(confidence, 0.0, 0.95))
     
     def _load_models(self, symbol: str, timeframe: str):
-        """Load all available models, scalers, selectors, and performance metrics for a symbol/timeframe"""
+        """Load all available models for a symbol/timeframe"""
         safe_symbol = symbol.replace('/', '_')
         model_types = ['price', 'direction']
         model_names = ['lightgbm', 'xgboost', 'catboost']
         
         for model_type in model_types:
-            # Load feature selector and performance metrics
-            selector_path = f"ml_models/{safe_symbol}_{timeframe}_{model_type}_selector.joblib"
-            perf_path = f"ml_models/{safe_symbol}_{timeframe}_{model_type}_performance.joblib"
-            
-            if os.path.exists(selector_path):
-                try:
-                    selector = joblib.load(selector_path)
-                    self.feature_selectors[f"{symbol}_{timeframe}_{model_type}"] = selector
-                except Exception as e:
-                    logging.warning(f"⚠️ Failed to load selector {selector_path}: {e}")
-            
-            if os.path.exists(perf_path):
-                try:
-                    perf = joblib.load(perf_path)
-                    self.model_performance[f"{symbol}_{timeframe}_{model_type}"] = perf
-                except Exception as e:
-                    logging.warning(f"⚠️ Failed to load performance {perf_path}: {e}")
-            
-            # Load models and scalers
             for model_name in model_names:
                 model_path = f"ml_models/{safe_symbol}_{timeframe}_{model_type}_{model_name}.joblib"
                 scaler_path = f"ml_models/{safe_symbol}_{timeframe}_{model_type}_scaler.joblib"
@@ -1283,53 +1043,27 @@ class OptimizedCryptoMLSystem:
 
 def main():
     """Main execution"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Optimized Crypto ML Training System')
-    parser.add_argument('--symbol', type=str, help='Specific symbol to train (e.g., BTC/USDT)')
-    parser.add_argument('--timeframe', type=str, help='Specific timeframe to train (e.g., 1h, 4h)')
-    parser.add_argument('--n-features', type=int, default=50, help='Number of features to select (default: 50)')
-    parser.add_argument('--tune', action='store_true', help='Enable hyperparameter tuning with Optuna')
-    parser.add_argument('--n-trials', type=int, default=50, help='Number of Optuna trials (default: 50)')
-    args = parser.parse_args()
-    
     print("\n" + "="*70)
     print("🧠 OPTIMIZED CRYPTO ML TRAINING SYSTEM")
     print("="*70)
     print("\nStrategy: LightGBM + XGBoost + CatBoost + GRU Ensemble")
     print("Database: ml_crypto_data.db")
-    print(f"Feature Selection: Top {args.n_features} features")
-    print(f"Hyperparameter Tuning: {'Enabled' if args.tune else 'Disabled'}")
-    if args.tune:
-        print(f"Optuna Trials: {args.n_trials}")
     print("\n" + "="*70 + "\n")
     
-    # Initialize system with enhanced features
-    ml_system = OptimizedCryptoMLSystem(
-        n_features=args.n_features,
-        enable_tuning=args.tune,
-        n_trials=args.n_trials
-    )
+    # Initialize system
+    ml_system = OptimizedCryptoMLSystem()
     
-    # Determine symbols and timeframes to train
-    if args.symbol and args.timeframe:
-        symbols = [args.symbol]
-        timeframes = [args.timeframe]
-    elif args.symbol:
-        symbols = [args.symbol]
-        timeframes = ['5m', '15m', '1h', '4h', '1d']
-    elif args.timeframe:
-        symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
-        timeframes = [args.timeframe]
-    else:
-        symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
-        timeframes = ['5m', '15m', '1h', '4h', '1d']
+    # Symbols and timeframes
+    symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
+    timeframes = ['5m', '15m', '1h', '4h', '1d']
     
     print("\n📋 Training Plan:")
     print(f"   Symbols: {', '.join(symbols)}")
     print(f"   Timeframes: {', '.join(timeframes)}")
     print(f"   Models per symbol/timeframe: 6-7 (LightGBM, XGBoost, CatBoost x2, GRU for 4h)")
     print(f"   Total models: ~{len(symbols) * len(timeframes) * 6} models\n")
+    
+    input("Press ENTER to start training... ")
     
     # Track progress
     total_trained = 0
