@@ -12,6 +12,7 @@ class DatabaseManager:
         # In this project structure, 'data' is at the root
         self.db_path = db_path
         self.create_sentiment_table()
+        self.create_advanced_tables()
 
     def get_connection(self):
         if not os.path.exists(self.db_path):
@@ -123,3 +124,109 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error loading sentiment: {e}")
             return pd.DataFrame()
+
+    def load_order_book_data(self, symbol, hours=24):
+        """Load recent order book data"""
+        try:
+            with self.get_connection() as conn:
+                query = """
+                SELECT * FROM order_book_data 
+                WHERE symbol = ? AND timestamp >= datetime('now', ?) 
+                ORDER BY timestamp ASC
+                """
+                df = pd.read_sql_query(query, conn, params=(symbol, f'-{hours} hours'))
+                if not df.empty:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                return df
+        except Exception as e:
+            logging.error(f"Error loading order book data: {e}")
+            return pd.DataFrame()
+
+    def load_funding_data(self, symbol, days=30):
+        """Load recent funding/on-chain data"""
+        try:
+            with self.get_connection() as conn:
+                query = """
+                SELECT * FROM funding_data 
+                WHERE symbol = ? AND timestamp >= datetime('now', ?) 
+                ORDER BY timestamp ASC
+                """
+                df = pd.read_sql_query(query, conn, params=(symbol, f'-{days} days'))
+                if not df.empty:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+                return df
+        except Exception as e:
+            logging.error(f"Error loading funding data: {e}")
+            return pd.DataFrame()
+
+    def load_external_price_data(self, symbol, days=30):
+        """Load external exchange prices (Arbitrage)"""
+        try:
+            with self.get_connection() as conn:
+                query = """
+                SELECT * FROM external_price_data 
+                WHERE symbol = ? AND timestamp >= datetime('now', ?) 
+                ORDER BY timestamp ASC
+                """
+                df = pd.read_sql_query(query, conn, params=(symbol, f'-{days} days'))
+                if not df.empty:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+                return df
+        except Exception as e:
+            logging.error(f"Error loading external price data: {e}")
+            return pd.DataFrame()
+    def create_advanced_tables(self):
+        """Create tables for advanced market features"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 1. Order Book Snapshots
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS order_book_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    timestamp DATETIME NOT NULL,
+                    bid_volume_depth REAL,   -- Total volume of top N bids
+                    ask_volume_depth REAL,   -- Total volume of top N asks
+                    best_bid_price REAL,
+                    best_ask_price REAL,
+                    spread_pct REAL,         -- (Ask - Bid) / Bid
+                    imbalance_ratio REAL,    -- (BidVol - AskVol) / (BidVol + AskVol)
+                    UNIQUE(symbol, timestamp)
+                )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_ob_symbol_time ON order_book_data (symbol, timestamp)")
+
+                # 2. On-Chain / Funding Rates
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS funding_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    timestamp DATETIME NOT NULL,
+                    funding_rate REAL,       -- Current funding rate
+                    open_interest REAL,      -- Total open contracts/value
+                    liquidations_long REAL,  -- Recent long liquidations
+                    liquidations_short REAL, -- Recent short liquidations
+                    UNIQUE(symbol, timestamp)
+                )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_funding_symbol_time ON funding_data (symbol, timestamp)")
+
+                # 3. Cross-Exchange Reference Data
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS external_price_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    source_exchange TEXT NOT NULL, -- e.g., 'coinbase', 'kraken'
+                    timestamp DATETIME NOT NULL,
+                    close_price REAL,
+                    UNIQUE(symbol, source_exchange, timestamp)
+                )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_ext_symbol_time ON external_price_data (symbol, timestamp)")
+                
+                conn.commit()
+                logging.info("✅ Advanced market data tables checked/created")
+        except Exception as e:
+            logging.error(f"Error creating advanced tables: {e}")

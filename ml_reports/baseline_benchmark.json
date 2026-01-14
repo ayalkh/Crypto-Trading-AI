@@ -1,103 +1,103 @@
 {
-  "timestamp": "2026-01-08T12:24:30.566414",
+  "timestamp": "2026-01-12T19:50:34.506641",
   "version": "baseline",
   "models": {
     "BTC/USDT_1h": {
-      "num_features": 66,
-      "num_samples": 4208,
-      "train_samples": 2945,
-      "test_samples": 632,
+      "num_features": 90,
+      "num_samples": 4243,
+      "train_samples": 2970,
+      "test_samples": 637,
       "model_results": {
         "lightgbm": {
-          "mse": 1.644738749821355e-05,
-          "r2": -0.019442483680866207,
-          "direction_accuracy": 0.5237341772151899
+          "mse": 1.5179706505712965e-05,
+          "r2": -0.01980383272279962,
+          "direction_accuracy": 0.4913657770800628
         },
         "xgboost": {
-          "mse": 1.6150879307780813e-05,
-          "r2": -0.0010643037955013757,
-          "direction_accuracy": 0.4873417721518987
+          "mse": 1.4903594513233462e-05,
+          "r2": -0.0012540624696426583,
+          "direction_accuracy": 0.49293563579277866
         },
         "catboost": {
-          "mse": 1.6234325807942553e-05,
-          "r2": -0.00623648736499538,
-          "direction_accuracy": 0.5031645569620253
+          "mse": 1.4922189488047463e-05,
+          "r2": -0.002503311035651823,
+          "direction_accuracy": 0.5054945054945055
         }
       }
     },
     "BTC/USDT_4h": {
-      "num_features": 66,
-      "num_samples": 2080,
-      "train_samples": 1456,
-      "test_samples": 312,
+      "num_features": 90,
+      "num_samples": 2088,
+      "train_samples": 1461,
+      "test_samples": 314,
       "model_results": {
         "lightgbm": {
-          "mse": 9.128738033948123e-05,
-          "r2": -0.007075548844925006,
-          "direction_accuracy": 0.4967948717948718
+          "mse": 7.640507885555591e-05,
+          "r2": -0.0032957357853713454,
+          "direction_accuracy": 0.5031847133757962
         },
         "xgboost": {
-          "mse": 9.066705963845275e-05,
-          "r2": -0.00023221728995026503,
-          "direction_accuracy": 0.5384615384615384
+          "mse": 7.615972336733317e-05,
+          "r2": -7.390657227945852e-05,
+          "direction_accuracy": 0.5509554140127388
         },
         "catboost": {
-          "mse": 9.0485218574622e-05,
-          "r2": 0.001773839719012793,
-          "direction_accuracy": 0.5416666666666666
+          "mse": 7.622804751115415e-05,
+          "r2": -0.0009710893665852982,
+          "direction_accuracy": 0.5
         }
       }
     },
     "ETH/USDT_1h": {
-      "num_features": 66,
-      "num_samples": 4208,
-      "train_samples": 2945,
-      "test_samples": 632,
+      "num_features": 90,
+      "num_samples": 4243,
+      "train_samples": 2970,
+      "test_samples": 637,
       "model_results": {
         "lightgbm": {
-          "mse": 2.939738055910122e-05,
-          "r2": -0.0002569392068412224,
-          "direction_accuracy": 0.5221518987341772
+          "mse": 2.3908908868334612e-05,
+          "r2": 0.0021347465402333787,
+          "direction_accuracy": 0.5086342229199372
         },
         "xgboost": {
-          "mse": 2.9389829518129556e-05,
-          "r2": -1.2195437548712107e-08,
-          "direction_accuracy": 0.5221518987341772
+          "mse": 2.3978008832764523e-05,
+          "r2": -0.0007492183407920017,
+          "direction_accuracy": 0.478806907378336
         },
         "catboost": {
-          "mse": 2.9426105762827494e-05,
-          "r2": -0.0012343250762920643,
-          "direction_accuracy": 0.5142405063291139
+          "mse": 2.3912364447497294e-05,
+          "r2": 0.001990524049946929,
+          "direction_accuracy": 0.5070643642072213
         }
       }
     },
     "ETH/USDT_4h": {
-      "num_features": 66,
-      "num_samples": 2080,
-      "train_samples": 1456,
-      "test_samples": 312,
+      "num_features": 90,
+      "num_samples": 2088,
+      "train_samples": 1461,
+      "test_samples": 314,
       "model_results": {
         "lightgbm": {
-          "mse": 0.00018997391551639332,
-          "r2": 0.002214434345487959,
-          "direction_accuracy": 0.5352564102564102
+          "mse": 0.00015851516206182495,
+          "r2": -0.026030557703935697,
+          "direction_accuracy": 0.4840764331210191
         },
         "xgboost": {
-          "mse": 0.00019041242602647106,
-          "r2": -8.872109642643622e-05,
-          "direction_accuracy": 0.5608974358974359
+          "mse": 0.00015449714475728585,
+          "r2": -2.2897097738283634e-05,
+          "direction_accuracy": 0.5509554140127388
         },
         "catboost": {
-          "mse": 0.00018895031366003586,
-          "r2": 0.00759062062071636,
-          "direction_accuracy": 0.5641025641025641
+          "mse": 0.0001560260745904927,
+          "r2": -0.009919292553231429,
+          "direction_accuracy": 0.5191082802547771
         }
       }
     }
   },
   "summary": {
-    "avg_r2": -0.0020043453221681995,
-    "avg_mse": 8.156851851745429e-05,
-    "avg_direction_accuracy": 0.5258303581088392
+    "avg_r2": -0.005041552754820609,
+    "avg_mse": 6.788633364993642e-05,
+    "avg_direction_accuracy": 0.507715138970826
   }
 }

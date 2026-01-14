@@ -47,7 +47,8 @@ class ComprehensiveMLDataCollector:
     def __init__(self, db_path='data/ml_crypto_data.db'):
         """Initialize comprehensive data collector"""
         self.db_path = db_path
-        self.exchange = ccxt.binance()
+        self.exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+        self.secondary_exchange = ccxt.coinbase() # For arbitrage reference
         
         # Extended configuration for ML
         self.symbols = [
@@ -162,6 +163,48 @@ class ComprehensiveMLDataCollector:
                 training_ready BOOLEAN DEFAULT 0,
                 prediction_ready BOOLEAN DEFAULT 0,
                 UNIQUE(symbol, timeframe)
+            )
+        ''')
+        
+        # Funding Data
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS funding_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                timestamp DATETIME NOT NULL,
+                funding_rate REAL, 
+                open_interest REAL,
+                liquidations_long REAL,
+                liquidations_short REAL,
+                UNIQUE(symbol, timestamp)
+            )
+        ''')
+        
+        # Order Book Data
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS order_book_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                timestamp DATETIME NOT NULL,
+                bid_volume_depth REAL,
+                ask_volume_depth REAL,
+                best_bid_price REAL,
+                best_ask_price REAL,
+                spread_pct REAL,
+                imbalance_ratio REAL,
+                UNIQUE(symbol, timestamp)
+            )
+        ''')
+        
+        # External Price Data (Arbitrage)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS external_price_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                source_exchange TEXT NOT NULL,
+                timestamp DATETIME NOT NULL,
+                close_price REAL,
+                UNIQUE(symbol, source_exchange, timestamp)
             )
         ''')
         
@@ -500,6 +543,309 @@ class ComprehensiveMLDataCollector:
         # Display final status
         self.display_database_status()
     
+    def save_order_book_data(self, data: Dict) -> bool:
+        """Save order book snapshot to database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR IGNORE INTO order_book_data (
+                    symbol, timestamp, bid_volume_depth, ask_volume_depth,
+                    best_bid_price, best_ask_price, spread_pct, imbalance_ratio
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data['symbol'], data['timestamp'], 
+                data['bid_vol'], data['ask_vol'],
+                data['best_bid'], data['best_ask'],
+                data['spread_pct'], data['imbalance']
+            ))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logging.error(f"❌ Error saving order book: {e}")
+            return False
+
+    def save_funding_data(self, data: Dict) -> bool:
+        """Save funding/derivative data to database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR IGNORE INTO funding_data (
+                    symbol, timestamp, funding_rate, open_interest
+                ) VALUES (?, ?, ?, ?)
+            """, (
+                data['symbol'], data['timestamp'],
+                data['funding_rate'], data['open_interest']
+            ))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logging.error(f"❌ Error saving funding data: {e}")
+            return False
+
+    def fetch_market_depth(self, symbol: str) -> Dict:
+        """Fetch current order book depth"""
+        try:
+            # Fetch top 20 bids/asks
+            orderbook = self.exchange.fetch_order_book(symbol, limit=20)
+            
+            bids = orderbook['bids']
+            asks = orderbook['asks']
+            
+            if not bids or not asks:
+                return {}
+            
+            # Calculate metrics
+            bid_vol = sum([b[1] for b in bids])
+            ask_vol = sum([a[1] for a in asks])
+            
+            best_bid = bids[0][0]
+            best_ask = asks[0][0]
+            
+            spread_pct = (best_ask - best_bid) / best_bid
+            imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol)
+            
+            return {
+                'symbol': symbol,
+                'timestamp': datetime.now(),
+                'bid_vol': bid_vol,
+                'ask_vol': ask_vol,
+                'best_bid': best_bid,
+                'best_ask': best_ask,
+                'spread_pct': spread_pct,
+                'imbalance': imbalance
+            }
+        except Exception as e:
+            logging.warning(f"⚠️ Error fetching order book for {symbol}: {e}")
+            return {}
+
+    def fetch_funding_metrics(self, symbol: str) -> Dict:
+        """Fetch funding rate and open interest"""
+        try:
+            # Note: This often requires a futures exchange instance or specific call
+            # For standard Binance spot, this might fail or return None.
+            # We will try/catch and log.
+            
+            # Use public endpoint for funding rate if possible, or exchange method
+            # ccxt binance funding rate usually requires 'options': {'defaultType': 'future'}
+            # Checks if exchange supports it
+            if not self.exchange.has.get('fetchFundingRate'):
+                return {}
+
+            funding = self.exchange.fetch_funding_rate(symbol)
+            funding_rate = funding.get('fundingRate')
+            
+            # Open Interest
+            oi_val = 0
+            if self.exchange.has.get('fetchOpenInterest'):
+                oi = self.exchange.fetch_open_interest(symbol)
+                oi_val = oi.get('openInterestAmount', 0)
+            
+            return {
+                'symbol': symbol,
+                'timestamp': datetime.now(),
+                'funding_rate': funding_rate,
+                'open_interest': oi_val
+            }
+        except Exception as e:
+            # Common to fail on Spot markets
+            return {}
+
+    def collect_advanced_metrics(self):
+        """Collect snapshot of advanced metrics for all symbols"""
+        logging.info("🚀 Collecting Advanced Metrics (Snapshot)...")
+        
+        count = 0
+        for symbol in self.symbols:
+            # 1. Market Depth
+            depth = self.fetch_market_depth(symbol)
+            if depth:
+                self.save_order_book_data(depth)
+                count += 1
+            
+            # 2. Arbitrage Data (Coinbase Price)
+            ref_price = self.fetch_reference_prices(symbol)
+            if ref_price:
+                self.save_external_price_data(ref_price)
+
+            # 3. Funding (Likely to fail on spot config, but we try)
+            # To support this properly, we'd need a separate Exchange instance for Futures.
+            # Skipping for now to avoid 'Spot does not have funding' errors unless configured.
+            
+            time.sleep(0.5)
+            
+        logging.info(f"✅ Collected advanced metrics for {count} symbols")
+
+    def save_external_price_data(self, data: Dict) -> bool:
+        """Save external exchange price data for arbitrage"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR IGNORE INTO external_price_data (
+                    symbol, source_exchange, timestamp, close_price
+                ) VALUES (?, ?, ?, ?)
+            """, (
+                data['symbol'], data['source'],
+                data['timestamp'], data['price']
+            ))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logging.error(f"❌ Error saving external price: {e}")
+            return False
+
+    def fetch_reference_prices(self, symbol: str) -> Dict:
+        """Fetch price from secondary exchange (Coinbase)"""
+        try:
+            if not self.secondary_exchange:
+                return {}
+                
+            # Convert symbol if needed (e.g. BTC/USDT -> BTC/USD on Coinbase)
+            # Coinbase mostly uses USD, but supports USDT pairs too.
+            # We'll try fetching the exact ticker first.
+            ticker = self.secondary_exchange.fetch_ticker(symbol)
+            price = ticker['last']
+            
+            return {
+                'symbol': symbol,
+                'source': 'coinbase',
+                'timestamp': datetime.now(),
+                'price': price
+            }
+        except Exception as e:
+            # Fallback: Try USD pair if USDT fails
+            try:
+                if '/USDT' in symbol:
+                    alt_symbol = symbol.replace('/USDT', '/USD')
+                    ticker = self.secondary_exchange.fetch_ticker(alt_symbol)
+                    return {
+                        'symbol': symbol, # Keep original symbol for DB consistency
+                        'source': 'coinbase',
+                        'timestamp': datetime.now(),
+                        'price': ticker['last']
+                    }
+            except:
+                pass
+            return {}
+
+            return {}
+
+    def backfill_arbitrage_history(self, symbol: str, months_back: int = 6):
+        """
+        Backfill historical close prices from secondary exchange (Coinbase).
+        """
+        logging.info(f"🔙 Backfilling arbitrage history for {symbol} ({months_back} months)...")
+        try:
+            if not self.secondary_exchange:
+                logging.warning("⚠️ No secondary exchange configured for arbitrage backfill")
+                return
+
+            # Adjust symbol for Coinbase (USDT -> USD usually)
+            search_symbol = symbol
+            if '/USDT' in symbol:
+                search_symbol = symbol.replace('/USDT', '/USD')
+            
+            # Fetch OHLCV
+            limit = 300
+            current_since = self.exchange.parse8601(
+                (datetime.now() - timedelta(days=months_back*30)).strftime('%Y-%m-%d 00:00:00')
+            )
+            
+            all_candles = []
+            while True:
+                try:
+                    candles = self.secondary_exchange.fetch_ohlcv(
+                        search_symbol, '1h', since=current_since, limit=limit
+                    )
+                    if not candles:
+                        break
+                    
+                    all_candles.extend(candles)
+                    current_since = candles[-1][0] + 1
+                    
+                    # Stop if caught up
+                    if len(candles) < limit:
+                        break
+                    
+                    # Rate limit
+                    time.sleep(self.secondary_exchange.rateLimit / 1000)
+                    
+                except Exception as e:
+                    logging.warning(f"⚠️ Error fetching history for {search_symbol}: {e}")
+                    break
+            
+            # Save to DB
+            saved_count = 0
+            for timestamp, open_p, high, low, close_p, volume in all_candles:
+                dt_obj = datetime.fromtimestamp(timestamp / 1000)
+                data = {
+                    'symbol': symbol, # Save as original symbol (e.g. BTC/USDT)
+                    'source': 'coinbase',
+                    'timestamp': dt_obj,
+                    'price': close_p
+                }
+                if self.save_external_price_data(data):
+                    saved_count += 1
+            
+            logging.info(f"✅ Backfilled {saved_count} arbitrage records for {symbol}")
+
+        except Exception as e:
+            logging.error(f"❌ Error backfilling arbitrage: {e}")
+
+    def backfill_funding_history(self, symbol: str, months_back: int = 6):
+        """
+        Backfill historical funding rates if supported by exchange.
+        """
+        try:
+            if not self.exchange.has.get('fetchFundingRateHistory'):
+                logging.warning(f"⚠️ Exchange does not support funding history for {symbol}")
+                return
+
+            logging.info(f"🔙 Backfilling funding history for {symbol} ({months_back} months)...")
+            
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=months_back * 30)
+            since = int(start_time.timestamp() * 1000)
+            
+            funding_rates = self.exchange.fetch_funding_rate_history(symbol, since=since, limit=1000)
+            
+            count = 0
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rate in funding_rates:
+                # Structure: {'timestamp': 123, 'fundingRate': 0.0001, ...}
+                ts = datetime.fromtimestamp(rate['timestamp'] / 1000)
+                
+                cursor.execute("""
+                    INSERT OR IGNORE INTO funding_data (
+                        symbol, timestamp, funding_rate, open_interest
+                    ) VALUES (?, ?, ?, ?)
+                """, (
+                    symbol, ts, 
+                    rate['fundingRate'], 
+                    0 # History usually doesn't include OI, default to 0
+                ))
+                count += 1
+            
+            conn.commit()
+            conn.close()
+            logging.info(f"✅ Backfilled {count} funding records for {symbol}")
+            
+        except Exception as e:
+            logging.error(f"❌ Error backfilling funding: {e}")
+
     def display_database_status(self):
         """Display comprehensive database status with ML readiness"""
         logging.info("\n📊 FINAL DATABASE STATUS")
@@ -656,6 +1002,9 @@ def main():
     
     parser = argparse.ArgumentParser(description='Comprehensive ML Data Collector V2')
     parser.add_argument('--status', action='store_true', help='Show database status only')
+    parser.add_argument('--advanced', action='store_true', help='Collect advanced metrics snapshot (OrderBook)')
+    parser.add_argument('--backfill-funding', action='store_true', help='Backfill historical funding rates')
+    parser.add_argument('--backfill-arbitrage', action='store_true', help='Backfill historical arbitrage prices')
     parser.add_argument('--symbols', nargs='+', help='Specific symbols to collect (default: all)')
     parser.add_argument('--timeframes', nargs='+', help='Specific timeframes (default: all)')
     parser.add_argument('--high-priority-only', action='store_true', help='Only collect HIGH priority timeframes (1h, 4h)')
@@ -668,6 +1017,15 @@ def main():
     if args.status:
         # Just show status
         collector.display_database_status()
+    elif args.backfill_funding:
+        for symbol in collector.symbols:
+            collector.backfill_funding_history(symbol)
+    elif args.backfill_arbitrage:
+        for symbol in collector.symbols:
+            collector.backfill_arbitrage_history(symbol)
+    elif args.advanced:
+        # Collect advanced metrics
+        collector.collect_advanced_metrics()
     else:
         # Override symbols if specified
         if args.symbols:

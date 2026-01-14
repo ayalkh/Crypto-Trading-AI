@@ -30,6 +30,7 @@ from datetime import datetime
 import logging
 from typing import Dict, List, Tuple, Optional
 from crypto_ai.features import FeatureEngineer
+from crypto_ai.database.db import DatabaseManager
 
 # Note: Logging will be configured in OptimizedCryptoMLSystem.__init__
 # to support dual output (console + file)
@@ -96,7 +97,7 @@ class OptimizedCryptoMLSystem:
     """
     
     
-    def __init__(self, db_path='data/ml_crypto_data.db', n_features=50, enable_tuning=False, n_trials=50):
+    def __init__(self, db_path='data/ml_crypto_data.db', n_features=50, enable_tuning=True, n_trials=20):
         """Initialize the optimized ML system
         
         Args:
@@ -106,6 +107,7 @@ class OptimizedCryptoMLSystem:
             n_trials: Number of Optuna trials for hyperparameter tuning
         """
         self.db_path = db_path
+        self.db_manager = DatabaseManager(db_path)
         self.models = {}
         self.scalers = {}
         self.feature_columns = []
@@ -171,14 +173,15 @@ class OptimizedCryptoMLSystem:
         
         return log_file
     
-    def load_data(self, symbol: str, timeframe: str, months_back: int = None) -> pd.DataFrame:
+    def load_data(self, symbol: str, timeframe: str, months_back: int = None, include_correlation: bool = True) -> pd.DataFrame:
         """
-        Load data from unified database
+        Load data from unified database with optional correlation data
         
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT')
             timeframe: Candle timeframe ('5m', '15m', '1h', '4h', '1d')
             months_back: Months of data to load (None = all available)
+            include_correlation: Whether to load a benchmark symbol for correlation
         """
         try:
             if not os.path.exists(self.db_path):
@@ -200,6 +203,7 @@ class OptimizedCryptoMLSystem:
             
             days_back = months_back * 30
             
+            # 1. Load Main Symbol
             query = """
             SELECT timestamp, open, high, low, close, volume
             FROM price_data 
@@ -209,14 +213,97 @@ class OptimizedCryptoMLSystem:
             """.format(days_back)
             
             df = pd.read_sql_query(query, conn, params=(symbol, timeframe))
-            conn.close()
             
             if df.empty:
+                conn.close()
                 logging.warning(f"⚠️ No data found for {symbol} {timeframe}")
                 return pd.DataFrame()
             
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             df.set_index('timestamp', inplace=True)
+            
+            # 2. Load Correlation Symbol (if enabled)
+            if include_correlation:
+                # Select benchmark: ETH if symbol is BTC, otherwise BTC
+                corr_symbol = 'ETH/USDT' if 'BTC' in symbol else 'BTC/USDT'
+                
+                df_corr = pd.read_sql_query(query, conn, params=(corr_symbol, timeframe))
+                if not df_corr.empty:
+                    df_corr['timestamp'] = pd.to_datetime(df_corr['timestamp'])
+                    df_corr.set_index('timestamp', inplace=True)
+                    
+                    # Merge specific columns
+                    df_corr = df_corr[['close', 'volume']].rename(
+                        columns={'close': 'corr_close', 'volume': 'corr_volume'}
+                    )
+                    
+                    # Merge closest timestamps (asof merge or direct join if aligned)
+                    df = df.join(df_corr, how='left')
+                    
+                    # Forward fill correlation data (up to a limit)
+                    df['corr_close'] = df['corr_close'].ffill(limit=5)
+                    df['corr_volume'] = df['corr_volume'].ffill(limit=5)
+                    
+                    logging.info(f"➕ Added correlation data from {corr_symbol}")
+
+            # 3. Load Advanced Features (Order Book & Funding)
+            # Fetch for the same period (days_back converted to hours for OB)
+            try:
+                # Order Book
+                df_ob = self.db_manager.load_order_book_data(symbol, hours=days_back*24)
+                if not df_ob.empty:
+                    # Rename columns to avoid collision and clarify source
+                    df_ob = df_ob.drop(columns=['id', 'symbol']).rename(columns={
+                        'bid_volume_depth': 'ob_bid_vol',
+                        'ask_volume_depth': 'ob_ask_vol',
+                        'spread_pct': 'ob_spread',
+                        'imbalance_ratio': 'ob_imbalance'
+                    })
+                    # Sort for merge_asof
+                    df_ob = df_ob.sort_values('timestamp')
+                    df = df.sort_index() # Ensure main df is sorted
+                    
+                    # Merge using asof (backward search)
+                    df = pd.merge_asof(df, df_ob, left_index=True, right_on='timestamp', 
+                                     direction='backward', tolerance=pd.Timedelta('1h'))
+                    
+                    # Set index back to timestamp and clean
+                    if 'timestamp' in df.columns:
+                        df.set_index('timestamp', inplace=True)
+                    logging.info(f"➕ Added Order Book features ({len(df_ob)} records)")
+                
+                # Funding Data
+                # Force 365 days to ensure we catch backfilled history
+                df_funding = self.db_manager.load_funding_data(symbol, days=max(days_back, 365))
+                if not df_funding.empty:
+                    df_funding = df_funding.drop(columns=['id', 'symbol'])
+                    df_funding = df_funding.sort_values('timestamp')
+                    
+                    df = pd.merge_asof(df, df_funding, left_index=True, right_on='timestamp',
+                                     direction='backward', tolerance=pd.Timedelta('4h'))
+                    
+                    if 'timestamp' in df.columns:
+                        df.set_index('timestamp', inplace=True)
+                    logging.info(f"➕ Added Funding features ({len(df_funding)} records)")
+                
+                # Arbitrage Data (External Prices - Force 365 days)
+                df_ext = self.db_manager.load_external_price_data(symbol, days=max(days_back, 365))
+                if not df_ext.empty:
+                    # Rename for clarity
+                    df_ext = df_ext[['timestamp', 'close_price']].rename(columns={'close_price': 'ext_price'})
+                    df_ext = df_ext.sort_values('timestamp')
+                    
+                    df = pd.merge_asof(df, df_ext, left_index=True, right_on='timestamp',
+                                     direction='backward', tolerance=pd.Timedelta('30m'))
+                    
+                    if 'timestamp' in df.columns:
+                        df.set_index('timestamp', inplace=True)
+                    logging.info(f"➕ Added Arbitrage features ({len(df_ext)} records)")
+                    
+            except Exception as e:
+                logging.warning(f"⚠️ Error merging advanced features: {e}")
+
+            conn.close()
             
             logging.info(f"📊 Loaded {len(df)} candles for {symbol} {timeframe} ({months_back} months)")
             return df
@@ -271,7 +358,7 @@ class OptimizedCryptoMLSystem:
     def create_features(self, df: pd.DataFrame, sentiment_df: pd.DataFrame = None) -> pd.DataFrame:
         """
         Create comprehensive feature set optimized for gradient boosting
-        DELEGATED to FeatureEngineer class for consistency
+        with outlier removal and correlation features
         """
         if df.empty:
             return df
@@ -279,8 +366,59 @@ class OptimizedCryptoMLSystem:
         logging.info("🧠 Generating features using centralized FeatureEngineer...")
         df_features = self.feature_engineer.create_features(df, sentiment_df)
         
+        # --- DATA QUALITY IMPROVEMENTS ---
+        
+        # 1. Add Correlation Features (if loaded)
+        if 'corr_close' in df.columns:
+            # Correlation Score (30-period rolling correlation)
+            df_features['corr_btc_eth'] = df['close'].rolling(30).corr(df['corr_close'])
+            # Relative Strength (Price Ratio)
+            df_features['rel_strength'] = df['close'] / df['corr_close']
+            # Divergence (Difference in % change)
+            df_features['corr_divergence'] = df['close'].pct_change() - df['corr_close'].pct_change()
+            
+            logging.info("✨ Generated correlation features (corr_btc_eth, rel_strength, divergence)")
+
+        # 2. Outlier Removal (Clip extreme % changes)
+        # We don't want to drop the rows (loss of data), but clip the artifacts
+        # Using 99.9th percentile to catch flash crashes/API errors
+        numeric_cols = df_features.select_dtypes(include=[np.number]).columns
+        
+        # Only clip columns that look like returns/changes (small values)
+        # Assuming most features are normalized or small ratios
+        # Simple heuristic: Clip single-candle returns > 20%
+        if 'close_open_pct' in df_features.columns:
+            mask_outlier = df_features['close_open_pct'].abs() > 0.20
+            outliers = mask_outlier.sum()
+            if outliers > 0:
+                logging.info(f"🧹 Clipped {outliers} extreme outliers (>20% candle change)")
+                df_features.loc[mask_outlier, 'close_open_pct'] = \
+                    df_features.loc[mask_outlier, 'close_open_pct'].clip(-0.20, 0.20)
+        
         # Remove any rows with NaN values created during feature engineering
         initial_len = len(df)
+        
+        # DEBUG: Check which columns have NaNs
+        nan_cols = df_features.columns[df_features.isna().any()].tolist()
+        if nan_cols:
+            logging.warning(f"⚠️ Columns with NaNs: {nan_cols}")
+            # Check counts
+            nan_counts = df_features[nan_cols].isna().sum().to_dict()
+            logging.warning(f"⚠️ NaN Counts: {nan_counts}")
+            
+            # Check if any column is ALL NaNs
+            if df_features.shape[0] > 0:
+                all_nan = [c for c in nan_cols if df_features[c].isna().all()]
+                if all_nan:
+                    logging.error(f"❌ Columns with 100% NaNs: {all_nan}")
+                    logging.info(f"🔧 Removing {len(all_nan)} columns with 100% NaNs")
+
+        # CRITICAL FIX: Drop columns that are 100% NaN BEFORE dropping rows
+        # This prevents the row-wise dropna from removing all training samples
+        df_features = df_features.dropna(axis=1, how='all')
+        logging.info(f"📊 Features after removing 100% NaN columns: {len(df_features.columns)}")
+        
+        # Now drop rows with NaN values in remaining columns
         df_features.dropna(inplace=True)
         dropped = initial_len - len(df_features)
         
@@ -293,13 +431,14 @@ class OptimizedCryptoMLSystem:
     # _add_rsi, _add_macd, _add_bollinger_bands, _add_atr are no longer needed here as they are in FeatureEngineer
     # Removed to cleanup code
     
-    def prepare_data(self, df: pd.DataFrame, prediction_type: str = 'price') -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    def prepare_data(self, df: pd.DataFrame, prediction_type: str = 'price', threshold: float = None) -> Tuple[np.ndarray, np.ndarray, List[str]]:
         """
-        Prepare data for ML models
+        Prepare data for ML models with Threshold Labeling
         
         Args:
             df: DataFrame with features
             prediction_type: 'price' or 'direction'
+            threshold: % change threshold for labelling (e.g. 0.002 for 0.2%)
         
         Returns:
             X: Feature array
@@ -310,17 +449,55 @@ class OptimizedCryptoMLSystem:
             return np.array([]), np.array([]), []
         
         # Create target variable
+        future_return = df['close'].shift(-1) / df['close'] - 1
+        
         if prediction_type == 'price':
-            # Predict next candle's price change (%)
-            df['target'] = df['close'].shift(-1) / df['close'] - 1
+            # Regression: Predict exact % change
+            df['target'] = future_return
+            
         elif prediction_type == 'direction':
-            # Predict if next candle will be up (1) or down (0)
-            df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+            # Classification: 3-Class System (Threshold Labeling)
+            # 0: Hold (Neutral/Noise)
+            # 1: Buy (Significant Up)
+            # 2: Sell (Significant Down)
+            
+            if threshold is None:
+                # Default thresholds based on typical volatility
+                # 1h: 0.2%, 4h: 0.5%, 1d: 1.0%
+                threshold = 0.002 # Default 0.2%
+            
+            conditions = [
+                (future_return > threshold),       # Buy
+                (future_return < -threshold)       # Sell
+            ]
+            choices = [1, 2] # 1=Buy, 2=Sell
+            
+            # Default is 0 (Hold)
+            df['target'] = np.select(conditions, choices, default=0)
+            
+            # Log threshold info
+            logging.info(f"🎯 Threshold Labeling applied: >{threshold:.1%} = Buy, <-{threshold:.1%} = Sell")
+            
         else:
             raise ValueError(f"Unknown prediction_type: {prediction_type}")
         
-        # Exclude OHLCV and target from features
-        exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'target']
+        # Exclude OHLCV, target, and correlation columns from features
+        # Also exclude raw advanced columns that are sparse or non-stationary
+        # CRITICAL: Include raw columns that might be 100% NaN if coverage too low
+        exclude_cols = [
+            'open', 'high', 'low', 'close', 'volume', 'target', 'corr_close', 'corr_volume',
+            # Raw sparse columns (often 100% NaN)
+            'ob_imbalance', 'ob_spread', 'funding_rate', 'open_interest',
+            'best_bid_price', 'best_ask_price', 'ext_price', 
+            'ob_bid_vol', 'ob_ask_vol', 'ob_base_volume', 'ob_quote_volume',
+            'liquidations_long', 'liquidations_short',
+            # Derived OB features (might be missing if coverage <10%)
+            'ob_imbalance_ma12', 'ob_imbalance_delta', 'ob_spread_zscore',
+            # Derived Funding features (might be missing if coverage <5%)
+            'funding_rate_zscore', 'funding_cum_3d',
+            # Derived OI features (might be missing if coverage <5%)
+            'oi_pct_change', 'oi_sentiment'
+        ]
         feature_cols = [col for col in df.columns if col not in exclude_cols]
         
         # Prepare X and y
@@ -341,7 +518,12 @@ class OptimizedCryptoMLSystem:
         if prediction_type == 'price':
             logging.info(f"📊 Target stats - Mean: {y.mean():.4%}, Std: {y.std():.4%}, Min: {y.min():.4%}, Max: {y.max():.4%}")
         else:
-            logging.info(f"📊 Target distribution - UP: {(y==1).sum()} ({(y==1).mean():.1%}), DOWN: {(y==0).sum()} ({(y==0).mean():.1%})")
+            # Multi-class stats
+            counts = pd.Series(y).value_counts().sort_index()
+            total = len(y)
+            logging.info(f"📊 Classes: Hold(0): {counts.get(0,0)} ({counts.get(0,0)/total:.1%}), "
+                         f"Buy(1): {counts.get(1,0)} ({counts.get(1,0)/total:.1%}), "
+                         f"Sell(2): {counts.get(2,0)} ({counts.get(2,0)/total:.1%})")
         
         logging.info(f"📊 Prepared data: {X.shape[0]} samples, {X.shape[1]} features")
         return X, y, feature_cols
@@ -380,7 +562,8 @@ class OptimizedCryptoMLSystem:
         success_direction = self._train_direction_models(symbol, timeframe, df_features)
         
         # Train GRU for 4h timeframe
-        if timeframe == '4h' and DL_AVAILABLE:
+        # Train GRU (Deep Learning) - Available for all timeframes if TF is installed
+        if DL_AVAILABLE:
             success_gru = self._train_gru_model(symbol, timeframe, df)
         else:
             success_gru = False
@@ -645,12 +828,16 @@ class OptimizedCryptoMLSystem:
 
     
     def _train_direction_models(self, symbol: str, timeframe: str, df: pd.DataFrame) -> bool:
-        """Train direction prediction models (classification) with feature selection and hyperparameter tuning"""
-        logging.info(f"\n🎯 Training Direction Prediction Models")
+        """Train direction prediction models (MULTI-CLASS Classification)"""
+        logging.info(f"\n🎯 Training Direction Prediction Models (3-Class: Hold/Buy/Sell)")
         logging.info("-" * 60)
         
-        # Prepare data
-        X, y, feature_cols = self.prepare_data(df, prediction_type='direction')
+        # Set threshold based on timeframe
+        thresholds = {'5m': 0.001, '15m': 0.002, '1h': 0.003, '4h': 0.006, '1d': 0.015}
+        threshold = thresholds.get(timeframe, 0.003)
+        
+        # Prepare data (3 classes)
+        X, y, feature_cols = self.prepare_data(df, prediction_type='direction', threshold=threshold)
         
         if len(X) == 0:
             logging.error("❌ No valid data for direction prediction")
@@ -698,7 +885,7 @@ class OptimizedCryptoMLSystem:
         models = {}
         val_scores = {}  # Track validation accuracy for dynamic weights
         
-        # ========== 1. LightGBM Classifier ==========
+        # ========== 1. LightGBM Classifier (Multi-class) ==========
         if LIGHTGBM_AVAILABLE:
             logging.info("\n🌟 Training LightGBM Classifier...")
             
@@ -707,6 +894,9 @@ class OptimizedCryptoMLSystem:
                 
                 def objective(trial):
                     params = {
+                        'objective': 'multiclass',
+                        'num_class': 3,
+                        'metric': 'multi_logloss',
                         'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
                         'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
                         'max_depth': trial.suggest_int('max_depth', 3, 12),
@@ -726,10 +916,13 @@ class OptimizedCryptoMLSystem:
                 study = optuna.create_study(direction='maximize', study_name='lgb_direction')
                 study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
                 best_params = study.best_params
+                best_params.update({'objective': 'multiclass', 'num_class': 3, 'metric': 'multi_logloss'})
+                
                 logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
                 lgb_model = lgb.LGBMClassifier(**best_params, verbose=-1)
             else:
                 lgb_model = lgb.LGBMClassifier(
+                    objective='multiclass', num_class=3,
                     n_estimators=500, learning_rate=0.05, max_depth=7, num_leaves=31,
                     min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
                     random_state=42, verbose=-1
@@ -739,19 +932,24 @@ class OptimizedCryptoMLSystem:
                          callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)])
             models['lightgbm'] = lgb_model
             
-            # Evaluate
+            # Evaluate using Weighted F1 (better for imbalanced classes)
             pred_val = lgb_model.predict(X_val_scaled)
             pred_test = lgb_model.predict(X_test_scaled)
+            
             acc_val = accuracy_score(y_val, pred_val)
             acc_test = accuracy_score(y_test, pred_test)
-            prec = precision_score(y_test, pred_test, zero_division=0)
-            rec = recall_score(y_test, pred_test, zero_division=0)
-            f1 = f1_score(y_test, pred_test, zero_division=0)
+            f1 = f1_score(y_test, pred_test, average='weighted', zero_division=0)
+            
+            # Confusion Matrix summary (Precision per class)
+            report = classification_report(y_test, pred_test, output_dict=True, zero_division=0)
+            prec_buy = report.get('1', {}).get('precision', 0)
+            prec_sell = report.get('2', {}).get('precision', 0)
             
             val_scores['lightgbm'] = acc_val
-            logging.info(f"✅ LightGBM - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}, F1: {f1:.2%}")
+            logging.info(f"✅ LightGBM - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Weighted F1: {f1:.2%}")
+            logging.info(f"   Precision - Buy: {prec_buy:.2%}, Sell: {prec_sell:.2%}")
         
-        # ========== 2. XGBoost Classifier ==========
+        # ========== 2. XGBoost Classifier (Multi-class) ==========
         if XGBOOST_AVAILABLE:
             logging.info("\n🔥 Training XGBoost Classifier...")
             
@@ -760,6 +958,8 @@ class OptimizedCryptoMLSystem:
                 
                 def objective(trial):
                     params = {
+                        'objective': 'multi:softprob',
+                        'num_class': 3,
                         'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
                         'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
                         'max_depth': trial.suggest_int('max_depth', 3, 12),
@@ -777,10 +977,13 @@ class OptimizedCryptoMLSystem:
                 study = optuna.create_study(direction='maximize', study_name='xgb_direction')
                 study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
                 best_params = study.best_params
+                best_params.update({'objective': 'multi:softprob', 'num_class': 3})
+                
                 logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
                 xgb_model = xgb.XGBClassifier(**best_params, verbosity=0)
             else:
                 xgb_model = xgb.XGBClassifier(
+                    objective='multi:softprob', num_class=3,
                     n_estimators=500, learning_rate=0.05, max_depth=6, min_child_weight=3,
                     subsample=0.8, colsample_bytree=0.8, random_state=42, verbosity=0
                 )
@@ -791,14 +994,13 @@ class OptimizedCryptoMLSystem:
             # Evaluate
             pred_val = xgb_model.predict(X_val_scaled)
             pred_test = xgb_model.predict(X_test_scaled)
+            
             acc_val = accuracy_score(y_val, pred_val)
             acc_test = accuracy_score(y_test, pred_test)
-            prec = precision_score(y_test, pred_test, zero_division=0)
-            rec = recall_score(y_test, pred_test, zero_division=0)
-            f1 = f1_score(y_test, pred_test, zero_division=0)
+            f1 = f1_score(y_test, pred_test, average='weighted', zero_division=0)
             
             val_scores['xgboost'] = acc_val
-            logging.info(f"✅ XGBoost - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}, F1: {f1:.2%}")
+            logging.info(f"✅ XGBoost - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Weighted F1: {f1:.2%}")
         
         # ========== 3. CatBoost Classifier ==========
         if CATBOOST_AVAILABLE:
@@ -842,12 +1044,10 @@ class OptimizedCryptoMLSystem:
             pred_test = cb_model.predict(X_test_scaled)
             acc_val = accuracy_score(y_val, pred_val)
             acc_test = accuracy_score(y_test, pred_test)
-            prec = precision_score(y_test, pred_test, zero_division=0)
-            rec = recall_score(y_test, pred_test, zero_division=0)
-            f1 = f1_score(y_test, pred_test, zero_division=0)
+            f1 = f1_score(y_test, pred_test, average='weighted', zero_division=0)
             
             val_scores['catboost'] = acc_val
-            logging.info(f"✅ CatBoost - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}, F1: {f1:.2%}")
+            logging.info(f"✅ CatBoost - Val Acc: {acc_val:.2%}, Test Acc: {acc_test:.2%}, Weighted F1: {f1:.2%}")
         
         # ========== CALCULATE DYNAMIC WEIGHTS ==========
         if val_scores:
@@ -894,7 +1094,7 @@ class OptimizedCryptoMLSystem:
 
     
     def _train_gru_model(self, symbol: str, timeframe: str, df: pd.DataFrame) -> bool:
-        """Train GRU model for time series (4h timeframe only)"""
+        """Train GRU model for time series"""
         if not DL_AVAILABLE:
             logging.warning("⚠️ TensorFlow not available, skipping GRU training")
             return False
@@ -981,6 +1181,7 @@ class OptimizedCryptoMLSystem:
         
         Weights by timeframe (OPTIMIZED - Priority 1):
         - 1h: 50% LightGBM, 30% XGBoost, 20% CatBoost
+        - 1h: 50% LightGBM, 30% XGBoost, 20% CatBoost
         - 4h: 45% LightGBM, 30% XGBoost, 15% CatBoost, 10% GRU
         """
         logging.info(f"\n{'='*60}")
@@ -1018,7 +1219,7 @@ class OptimizedCryptoMLSystem:
         self._load_models(symbol, timeframe)
         
         # Get latest features for tabular models
-        exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'target']
+        exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'target', 'corr_close', 'corr_volume']
         available_features = [col for col in df_features.columns if col not in exclude_cols]
         
         if not available_features:
@@ -1026,6 +1227,8 @@ class OptimizedCryptoMLSystem:
             return predictions
         
         X_latest = df_features[available_features].iloc[-1:].values
+        
+        weight_config = {}
         
         if f"{symbol}_{timeframe}_price" in self.model_performance:
             perf_data = self.model_performance[f"{symbol}_{timeframe}_price"]
@@ -1036,8 +1239,8 @@ class OptimizedCryptoMLSystem:
                 for k, v in perf_data['dynamic_weights'].items():
                     weight_config[k] = v
 
-        if timeframe == '4h' and 'gru' not in weight_config:
-             # Ensure GRU has a weight if not dynamically tuned (or if tuning excluded it)
+        if f"{symbol}_{timeframe}_gru" in self.models and 'gru' not in weight_config:
+             # Ensure GRU has a weight if loaded but not dynamically tuned
              weight_config['gru'] = 0.10
 
         # 1. Price predictions (Regression)
@@ -1095,8 +1298,8 @@ class OptimizedCryptoMLSystem:
             except Exception as e:
                 logging.error(f"⚠️ Price model prediction failed: {e}")
         
-        # GRU (4h only)
-        if timeframe == '4h' and f"{symbol}_{timeframe}_gru" in self.models:
+        # GRU (Deep Learning)
+        if f"{symbol}_{timeframe}_gru" in self.models:
             self._predict_gru_price(df, symbol, timeframe, price_preds, price_weights, weight_config, predictions['model_predictions'])
 
         # Calculate ensemble price prediction
@@ -1139,56 +1342,95 @@ class OptimizedCryptoMLSystem:
                 
                 # Get probabilities from each model
                 for model_name in ['lightgbm', 'xgboost', 'catboost']:
-                     prob = self._get_model_prob(symbol, timeframe, model_name, X_dir_selected, direction_probs, direction_weights, dir_weight_config)
-                     if prob is not None:
+                     prob_dict = self._get_model_prob(symbol, timeframe, model_name, X_dir_selected, direction_probs, direction_weights, dir_weight_config)
+                     if prob_dict is not None:
+                         # Determine model's vote
+                         if prob_dict['buy'] > prob_dict['sell'] and prob_dict['buy'] > prob_dict['hold']:
+                             vote = 'UP'
+                         elif prob_dict['sell'] > prob_dict['buy'] and prob_dict['sell'] > prob_dict['hold']:
+                             vote = 'DOWN'
+                         else:
+                             vote = 'NEUTRAL'
+                             
                          predictions['model_breakdown'][model_name] = {
                              'weight': float(dir_weight_config.get(model_name, 0)),
-                             'probability_up': float(prob),
-                             'prediction': 'UP' if prob > 0.5 else 'DOWN'
+                             'prob_buy': float(prob_dict['buy']),
+                             'prob_sell': float(prob_dict['sell']),
+                             'prediction': vote
                          }
 
             except Exception as e:
                 logging.error(f"⚠️ Direction model prediction failed: {e}")
             
-        # Calculate weighted probability
+        # Calculate weighted probabilities
         if direction_probs:
             total_dir_weight = sum(direction_weights)
             norm_dir_weights = [w/total_dir_weight for w in direction_weights]
             
-            # direction_probs contains computed probability of class 1 (UP)
-            weighted_prob_up = sum(p * w for p, w in zip(direction_probs, norm_dir_weights))
+            # Aggregate probabilities
+            weighted_buy = sum(p['buy'] * w for p, w in zip(direction_probs, norm_dir_weights))
+            weighted_sell = sum(p['sell'] * w for p, w in zip(direction_probs, norm_dir_weights))
+            weighted_hold = sum(p['hold'] * w for p, w in zip(direction_probs, norm_dir_weights))
             
-            if weighted_prob_up > 0.55: # Threshold for UP
+            # Decision Logic
+            # We want to be confident.
+            # If Buy is strongest signal
+            if weighted_buy > weighted_sell and weighted_buy > weighted_hold:
                 predictions['direction'] = 'UP'
-                combined_conf = (weighted_prob_up - 0.5) * 2 # Scale 0.5-1.0 to 0.0-1.0
-            elif weighted_prob_up < 0.45: # Threshold for DOWN
+                combined_conf = weighted_buy
+            # If Sell is strongest
+            elif weighted_sell > weighted_buy and weighted_sell > weighted_hold:
                 predictions['direction'] = 'DOWN'
-                combined_conf = (0.5 - weighted_prob_up) * 2
+                combined_conf = weighted_sell
+            # Else Hold/Neutral
             else:
                 predictions['direction'] = 'NEUTRAL'
-                combined_conf = 0.0
+                combined_conf = weighted_hold
                 
             predictions['direction_confidence'] = float(combined_conf)
-            predictions['confidence'] = float(combined_conf) # Main confidence is now strictly model probability based
+            predictions['confidence'] = float(combined_conf)
             
-            logging.info(f"🎯 Ensemble Direction: {predictions['direction']} (Prob UP: {weighted_prob_up:.2%}, Conf: {combined_conf:.2%})")
+            logging.info(f"🎯 Ensemble: {predictions['direction']} (Buy: {weighted_buy:.2%}, Sell: {weighted_sell:.2%}, Hold: {weighted_hold:.2%})")
 
         logging.info(f"✅ Ensemble prediction complete!\n")
         return predictions
 
     def _get_model_prob(self, symbol, timeframe, model_name, X_latest_selected, probs_list, weights_list, weight_config):
-        """Helper to get probability from a specific model"""
+        """Helper to get probability from a specific model (3-class: Hold/Buy/Sell)"""
         model_key = f"{symbol}_{timeframe}_direction_{model_name}"
         if model_key in self.models:
             scaler = self.scalers.get(f"{symbol}_{timeframe}_direction")
             if scaler is not None:
                 # Expects feature-selected input
                 X_scaled = scaler.transform(X_latest_selected)
-                # predict_proba returns [prob_class_0, prob_class_1]
-                prob_up = self.models[model_key].predict_proba(X_scaled)[0][1]
-                probs_list.append(prob_up)
-                weights_list.append(weight_config.get(model_name, 0.33))
-                return prob_up
+                
+                # predict_proba returns [prob_hold, prob_buy, prob_sell]
+                try:
+                    probs = self.models[model_key].predict_proba(X_scaled)[0]
+                    
+                    # Handle cases where model might not have seen all classes (rare but possible)
+                    # We assume classes are [0, 1, 2] if initialized correctly with num_class=3
+                    # But sklearn/joblib load might be tricky if one class was never seen.
+                    # Strict validation:
+                    if len(probs) == 3:
+                        prob_hold, prob_buy, prob_sell = probs[0], probs[1], probs[2]
+                    elif len(probs) == 2:
+                        # Fallback if binary (old model or weird split)
+                        # Assume 0/1
+                        prob_hold = probs[0]
+                        prob_buy = probs[1]
+                        prob_sell = 0.0
+                    else:
+                        prob_hold, prob_buy, prob_sell = 1.0, 0.0, 0.0 # Fail safe
+                    
+                    prob_dict = {'hold': prob_hold, 'buy': prob_buy, 'sell': prob_sell}
+                    
+                    probs_list.append(prob_dict)
+                    weights_list.append(weight_config.get(model_name, 0.33))
+                    return prob_dict
+                except Exception as e:
+                    logging.warning(f"⚠️ Prob extraction error for {model_name}: {e}")
+                    return None
         return None
 
     def _predict_gru_price(self, df, symbol, timeframe, price_preds, price_weights, weight_config, model_predictions=None):
@@ -1328,7 +1570,7 @@ def main():
     print("\n📋 Training Plan:")
     print(f"   Symbols: {', '.join(symbols)}")
     print(f"   Timeframes: {', '.join(timeframes)}")
-    print(f"   Models per symbol/timeframe: 6-7 (LightGBM, XGBoost, CatBoost x2, GRU for 4h)")
+    print(f"   Models per symbol/timeframe: 6-7 (LightGBM, XGBoost, CatBoost x2, GRU)")
     print(f"   Total models: ~{len(symbols) * len(timeframes) * 6} models\n")
     
     # Track progress
