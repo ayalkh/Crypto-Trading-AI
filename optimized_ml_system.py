@@ -139,8 +139,28 @@ class OptimizedCryptoMLSystem:
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
         logging.info(f"✅ TensorFlow: {DL_AVAILABLE}")
         logging.info(f"✅ Optuna: {OPTUNA_AVAILABLE}")
-    
-    def _setup_logging(self):
+
+        # Check for GPU
+        self.gpu_available = self._check_gpu_availability()
+        logging.info(f"🚀 GPU Acceleration: {'Enabled' if self.gpu_available else 'Disabled (Not found)'}")
+
+    def _check_gpu_availability(self) -> bool:
+        """Check if NVIDIA GPU is available"""
+        try:
+            # Method 1: Check nvidia-smi
+            import subprocess
+            result = subprocess.run(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode == 0:
+                return True
+            
+            # Method 2: Check TensorFlow
+            if DL_AVAILABLE:
+                if len(tf.config.list_physical_devices('GPU')) > 0:
+                    return True
+                    
+            return False
+        except Exception:
+            return False
         """Setup logging to both console and file"""
         # Create timestamped log file
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -657,13 +677,19 @@ class OptimizedCryptoMLSystem:
                 study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
                 best_params = study.best_params
                 logging.info(f"   ✅ Best R²: {study.best_value:.4f}")
-                lgb_model = lgb.LGBMRegressor(**best_params, verbose=-1, force_col_wise=True)
             else:
-                lgb_model = lgb.LGBMRegressor(
-                    n_estimators=500, learning_rate=0.05, max_depth=7, num_leaves=31,
-                    min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
-                    reg_alpha=0.1, reg_lambda=0.1, random_state=42, verbose=-1, force_col_wise=True
-                )
+                lgb_params = {
+                    'n_estimators': 500, 'learning_rate': 0.05, 'max_depth': 7, 'num_leaves': 31,
+                    'min_child_samples': 20, 'subsample': 0.8, 'colsample_bytree': 0.8,
+                    'reg_alpha': 0.1, 'reg_lambda': 0.1, 'random_state': 42, 'verbose': -1
+                }
+                
+                # Enable GPU if available
+                if self.gpu_available:
+                    lgb_params.update({'device': 'gpu'})
+                    # Note: LightGBM needs OpenCL/CUDA. If it crashes, user might need to reinstall.
+                    
+                lgb_model = lgb.LGBMRegressor(**lgb_params)
             
             lgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)],
                          callbacks=[lgb.early_stopping(100), lgb.log_evaluation(0)])
@@ -710,13 +736,18 @@ class OptimizedCryptoMLSystem:
                 study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
                 best_params = study.best_params
                 logging.info(f"   ✅ Best R²: {study.best_value:.4f}")
-                xgb_model = xgb.XGBRegressor(**best_params, verbosity=0)
             else:
-                xgb_model = xgb.XGBRegressor(
-                    n_estimators=500, learning_rate=0.05, max_depth=6, min_child_weight=3,
-                    subsample=0.8, colsample_bytree=0.8, gamma=0.1,
-                    reg_alpha=0.1, reg_lambda=1.0, random_state=42, verbosity=0
-                )
+                xgb_params = {
+                    'n_estimators': 500, 'learning_rate': 0.05, 'max_depth': 6, 'min_child_weight': 3,
+                    'subsample': 0.8, 'colsample_bytree': 0.8, 'gamma': 0.1,
+                    'reg_alpha': 0.1, 'reg_lambda': 1.0, 'random_state': 42, 'verbosity': 0
+                }
+                
+                # Enable GPU if available
+                if self.gpu_available:
+                     xgb_params.update({'device': 'cuda'}) # For XGBoost >= 2.0
+                
+                xgb_model = xgb.XGBRegressor(**xgb_params)
             
             xgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
             models['xgboost'] = xgb_model
@@ -758,12 +789,17 @@ class OptimizedCryptoMLSystem:
                 study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
                 best_params = study.best_params
                 logging.info(f"   ✅ Best R²: {study.best_value:.4f}")
-                cb_model = cb.CatBoostRegressor(**best_params, verbose=False)
             else:
-                cb_model = cb.CatBoostRegressor(
-                    iterations=500, learning_rate=0.05, depth=6, l2_leaf_reg=3,
-                    random_seed=42, verbose=False
-                )
+                cb_params = {
+                    'iterations': 500, 'learning_rate': 0.05, 'depth': 6, 'l2_leaf_reg': 3,
+                    'random_seed': 42, 'verbose': False
+                }
+                
+                # Enable GPU if available
+                if self.gpu_available:
+                    cb_params.update({'task_type': 'GPU'})
+                    
+                cb_model = cb.CatBoostRegressor(**cb_params)
             
             cb_model.fit(X_train_scaled, y_train, eval_set=(X_val_scaled, y_val),
                         early_stopping_rounds=50, verbose=False)
@@ -919,14 +955,19 @@ class OptimizedCryptoMLSystem:
                 best_params.update({'objective': 'multiclass', 'num_class': 3, 'metric': 'multi_logloss'})
                 
                 logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
-                lgb_model = lgb.LGBMClassifier(**best_params, verbose=-1)
             else:
-                lgb_model = lgb.LGBMClassifier(
-                    objective='multiclass', num_class=3,
-                    n_estimators=500, learning_rate=0.05, max_depth=7, num_leaves=31,
-                    min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
-                    random_state=42, verbose=-1
-                )
+                lgb_params = {
+                    'objective': 'multiclass', 'num_class': 3,
+                    'n_estimators': 500, 'learning_rate': 0.05, 'max_depth': 7, 'num_leaves': 31,
+                    'min_child_samples': 20, 'subsample': 0.8, 'colsample_bytree': 0.8,
+                    'random_state': 42, 'verbose': -1
+                }
+                
+                # Enable GPU if available
+                if self.gpu_available:
+                    lgb_params.update({'device': 'gpu'})
+                    
+                lgb_model = lgb.LGBMClassifier(**lgb_params)
             
             lgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)],
                          callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)])
@@ -980,13 +1021,22 @@ class OptimizedCryptoMLSystem:
                 best_params.update({'objective': 'multi:softprob', 'num_class': 3})
                 
                 logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
+                # Add GPU parameter to best_params if available
+                if self.gpu_available:
+                    best_params.update({'tree_method': 'gpu_hist', 'device': 'cuda'})
                 xgb_model = xgb.XGBClassifier(**best_params, verbosity=0)
             else:
-                xgb_model = xgb.XGBClassifier(
-                    objective='multi:softprob', num_class=3,
-                    n_estimators=500, learning_rate=0.05, max_depth=6, min_child_weight=3,
-                    subsample=0.8, colsample_bytree=0.8, random_state=42, verbosity=0
-                )
+                xgb_params = {
+                    'objective': 'multi:softprob', 'num_class': 3,
+                    'n_estimators': 500, 'learning_rate': 0.05, 'max_depth': 6, 'min_child_weight': 3,
+                    'subsample': 0.8, 'colsample_bytree': 0.8, 'random_state': 42, 'verbosity': 0
+                }
+                
+                # Enable GPU if available
+                if self.gpu_available:
+                    xgb_params.update({'tree_method': 'gpu_hist', 'device': 'cuda'})
+                    
+                xgb_model = xgb.XGBClassifier(**xgb_params)
             
             xgb_model.fit(X_train_scaled, y_train, eval_set=[(X_val_scaled, y_val)], verbose=False)
             models['xgboost'] = xgb_model
@@ -1028,12 +1078,17 @@ class OptimizedCryptoMLSystem:
                 study.optimize(objective, n_trials=self.n_trials, show_progress_bar=False)
                 best_params = study.best_params
                 logging.info(f"   ✅ Best Accuracy: {study.best_value:.2%}")
-                cb_model = cb.CatBoostClassifier(**best_params, verbose=False)
             else:
-                cb_model = cb.CatBoostClassifier(
-                    iterations=500, learning_rate=0.05, depth=6, l2_leaf_reg=3,
-                    random_seed=42, verbose=False
-                )
+                cb_params = {
+                    'iterations': 500, 'learning_rate': 0.05, 'depth': 6, 'l2_leaf_reg': 3,
+                    'random_seed': 42, 'verbose': False
+                }
+                
+                # Enable GPU if available
+                if self.gpu_available:
+                    cb_params.update({'task_type': 'GPU'})
+                    
+                cb_model = cb.CatBoostClassifier(**cb_params)
             
             cb_model.fit(X_train_scaled, y_train, eval_set=(X_val_scaled, y_val),
                         early_stopping_rounds=50, verbose=False)

@@ -67,7 +67,7 @@ def main():
     # Running without arguments uses defaults (BTC, ETH, etc.)
     if not run_step(
         "Data Collection", 
-        ['comprehensive_ml_collector_v2.py'],
+        ['collectors/comprehensive_ml_collector_v2.py'],
         "Collecting historical OHLCV data for major cryptocurrencies..."
     ):
         print("\n⚠️ Data collection failed. Cannot proceed with training.")
