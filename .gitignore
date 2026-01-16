@@ -220,3 +220,4 @@ catboost_info/
 # Database Files
 *.db
 *.sqlite
+/ml_configs
