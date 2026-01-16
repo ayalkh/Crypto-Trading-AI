@@ -1,6 +1,6 @@
 """
 Enhanced 24/7 Crypto Trading Automation System
-Compatible with your multi_timeframe_collector and multi_timeframe_analyzer
+Compatible with your comprehensive_ml_collector_v2 and unified_crypto_analyzer
 """
 import os
 import sys
@@ -99,7 +99,7 @@ class EnhancedTradingAutomation:
                 "max_errors": 10,
                 "error_cooldown_minutes": 30,
                 "cleanup_interval_hours": 24,
-                "database_path": "data/multi_timeframe_data.db"
+                "database_path": "data/ml_crypto_data.db"
             }
         }
         
@@ -144,13 +144,13 @@ class EnhancedTradingAutomation:
             if hours_since_force >= self.config['data_collection']['force_update_hours']:
                 logging.info("🔄 Running forced data collection (fresh data)")
                 result = subprocess.run([
-                    sys.executable, 'multi_timeframe_collector.py', '--force'
+                    sys.executable, 'comprehensive_ml_collector_v2.py', '--force'
                 ], capture_output=True, text=True)
                 self.set_last_force_update()
             else:
                 logging.info("📈 Running normal data collection")
                 result = subprocess.run([
-                    sys.executable, 'multi_timeframe_collector.py'
+                    sys.executable, 'comprehensive_ml_collector_v2.py'
                 ], capture_output=True, text=True)
             
             if result.returncode == 0:
@@ -171,7 +171,7 @@ class EnhancedTradingAutomation:
             
             # Run the analyzer
             result = subprocess.run([
-                sys.executable, 'multi_timeframe_analyzer.py'
+                sys.executable, 'unified_crypto_analyzer.py'
             ], capture_output=True, text=True)
             
             if result.returncode == 0:

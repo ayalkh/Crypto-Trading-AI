@@ -75,6 +75,22 @@ except ImportError:
     DL_AVAILABLE = False
     print("⚠️ TensorFlow not available. Install: pip install tensorflow")
 
+# GPU utilities
+try:
+    from crypto_ai.gpu_utils import (
+        detect_gpu_availability, get_xgboost_gpu_params, 
+        get_catboost_gpu_params, get_lightgbm_gpu_params,
+        configure_tensorflow_gpu, XGBOOST_GPU_AVAILABLE, 
+        CATBOOST_GPU_AVAILABLE, LIGHTGBM_GPU_AVAILABLE, TENSORFLOW_GPU_AVAILABLE
+    )
+    GPU_UTILS_AVAILABLE = True
+except ImportError:
+    GPU_UTILS_AVAILABLE = False
+    XGBOOST_GPU_AVAILABLE = False
+    CATBOOST_GPU_AVAILABLE = False
+    LIGHTGBM_GPU_AVAILABLE = False
+    TENSORFLOW_GPU_AVAILABLE = False
+
 
 class OptimizedCryptoMLSystem:
     """
@@ -113,6 +129,12 @@ class OptimizedCryptoMLSystem:
         logging.info(f"✅ XGBoost: {XGBOOST_AVAILABLE}")
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
         logging.info(f"✅ TensorFlow: {DL_AVAILABLE}")
+        
+        # Detect and log GPU availability
+        if GPU_UTILS_AVAILABLE:
+            detect_gpu_availability(log_results=True)
+            if DL_AVAILABLE:
+                configure_tensorflow_gpu()
     
     def _setup_logging(self):
         """Setup logging to both console and file"""
@@ -462,8 +484,11 @@ class OptimizedCryptoMLSystem:
                 reg_lambda=0.1,
                 random_state=42,
                 verbose=-1,
-                force_col_wise=True  # Better for wide datasets
+                force_col_wise=not LIGHTGBM_GPU_AVAILABLE,  # Use col_wise on CPU only
+                **({'device': 'gpu'} if LIGHTGBM_GPU_AVAILABLE else {})
             )
+            if LIGHTGBM_GPU_AVAILABLE:
+                logging.info("   🖥️  Using LightGBM GPU acceleration")
             lgb_model.fit(
                 X_train_scaled, y_train,
                 eval_set=[(X_val_scaled, y_val)],
@@ -484,19 +509,24 @@ class OptimizedCryptoMLSystem:
         # 2. XGBoost (SECONDARY) ⭐⭐⭐⭐⭐
         if XGBOOST_AVAILABLE:
             logging.info("\n🔥 Training XGBoost (Secondary)...")
-            xgb_model = xgb.XGBRegressor(
-                n_estimators=500,
-                learning_rate=0.05,
-                max_depth=6,
-                min_child_weight=3,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                gamma=0.1,
-                reg_alpha=0.1,
-                reg_lambda=1.0,
-                random_state=42,
-                verbosity=0
-            )
+            xgb_params = {
+                'n_estimators': 500,
+                'learning_rate': 0.05,
+                'max_depth': 6,
+                'min_child_weight': 3,
+                'subsample': 0.8,
+                'colsample_bytree': 0.8,
+                'gamma': 0.1,
+                'reg_alpha': 0.1,
+                'reg_lambda': 1.0,
+                'random_state': 42,
+                'verbosity': 0
+            }
+            # Add GPU parameters if available
+            if XGBOOST_GPU_AVAILABLE:
+                xgb_params.update({'tree_method': 'hist', 'device': 'cuda'})
+                logging.info("   🖥️  Using CUDA GPU acceleration")
+            xgb_model = xgb.XGBRegressor(**xgb_params)
             xgb_model.fit(
                 X_train_scaled, y_train,
                 eval_set=[(X_val_scaled, y_val)],
@@ -518,14 +548,19 @@ class OptimizedCryptoMLSystem:
             
             # Simplified: Use scaled data like other models
             # CatBoost is robust enough to work without explicit categorical features
-            cb_model = cb.CatBoostRegressor(
-                iterations=500,
-                learning_rate=0.05,
-                depth=6,
-                l2_leaf_reg=3,
-                random_seed=42,
-                verbose=False
-            )
+            cb_params = {
+                'iterations': 500,
+                'learning_rate': 0.05,
+                'depth': 6,
+                'l2_leaf_reg': 3,
+                'random_seed': 42,
+                'verbose': False
+            }
+            # Add GPU parameters if available
+            if CATBOOST_GPU_AVAILABLE:
+                cb_params['task_type'] = 'GPU'
+                logging.info("   🖥️  Using CUDA GPU acceleration")
+            cb_model = cb.CatBoostRegressor(**cb_params)
             
             cb_model.fit(
                 X_train_scaled, y_train,
@@ -610,8 +645,11 @@ class OptimizedCryptoMLSystem:
                 subsample=0.8,
                 colsample_bytree=0.8,
                 random_state=42,
-                verbose=-1
+                verbose=-1,
+                **({'device': 'gpu'} if LIGHTGBM_GPU_AVAILABLE else {})
             )
+            if LIGHTGBM_GPU_AVAILABLE:
+                logging.info("   🖥️  Using LightGBM GPU acceleration")
             lgb_model.fit(
                 X_train_scaled, y_train,
                 eval_set=[(X_val_scaled, y_val)],
@@ -627,16 +665,21 @@ class OptimizedCryptoMLSystem:
         # 2. XGBoost Classifier
         if XGBOOST_AVAILABLE:
             logging.info("\n🔥 Training XGBoost Classifier...")
-            xgb_model = xgb.XGBClassifier(
-                n_estimators=500,
-                learning_rate=0.05,
-                max_depth=6,
-                min_child_weight=3,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42,
-                verbosity=0
-            )
+            xgb_params = {
+                'n_estimators': 500,
+                'learning_rate': 0.05,
+                'max_depth': 6,
+                'min_child_weight': 3,
+                'subsample': 0.8,
+                'colsample_bytree': 0.8,
+                'random_state': 42,
+                'verbosity': 0
+            }
+            # Add GPU parameters if available
+            if XGBOOST_GPU_AVAILABLE:
+                xgb_params.update({'tree_method': 'hist', 'device': 'cuda'})
+                logging.info("   🖥️  Using CUDA GPU acceleration")
+            xgb_model = xgb.XGBClassifier(**xgb_params)
             xgb_model.fit(
                 X_train_scaled, y_train,
                 eval_set=[(X_val_scaled, y_val)],
@@ -654,14 +697,19 @@ class OptimizedCryptoMLSystem:
             logging.info("\n🐱 Training CatBoost Classifier...")
             
             # Simplified: Use scaled data like other models
-            cb_model = cb.CatBoostClassifier(
-                iterations=500,
-                learning_rate=0.05,
-                depth=6,
-                l2_leaf_reg=3,
-                random_seed=42,
-                verbose=False
-            )
+            cb_params = {
+                'iterations': 500,
+                'learning_rate': 0.05,
+                'depth': 6,
+                'l2_leaf_reg': 3,
+                'random_seed': 42,
+                'verbose': False
+            }
+            # Add GPU parameters if available
+            if CATBOOST_GPU_AVAILABLE:
+                cb_params['task_type'] = 'GPU'
+                logging.info("   🖥️  Using CUDA GPU acceleration")
+            cb_model = cb.CatBoostClassifier(**cb_params)
             
             cb_model.fit(
                 X_train_scaled, y_train,
@@ -1063,7 +1111,7 @@ def main():
     print(f"   Models per symbol/timeframe: 6-7 (LightGBM, XGBoost, CatBoost x2, GRU for 4h)")
     print(f"   Total models: ~{len(symbols) * len(timeframes) * 6} models\n")
     
-    input("Press ENTER to start training... ")
+    print("▶️ Starting training automatically...")
     
     # Track progress
     total_trained = 0

@@ -162,10 +162,4 @@ xgboost==3.0.3
 yarl==1.20.1
 APScheduler==3.11.0
 
-streamlit==1.41.1
-
 optuna>=4.0.0
-tweepy
-praw
-textblob
-vaderSentiment

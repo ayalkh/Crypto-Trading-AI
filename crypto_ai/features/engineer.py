@@ -55,52 +55,59 @@ class FeatureEngineer:
         self._add_adx(df)
         self._add_market_regime(df)
         
-        # 5. Volume indicators
+        # 5. NEW: Order book, funding, OI, arbitrage, and correlation proxies
+        self._add_order_book_proxies(df)
+        self._add_funding_rate_proxies(df)
+        self._add_open_interest_proxies(df)
+        self._add_arbitrage_features(df)
+        self._add_correlation_features(df)
+        
+        # 6. Volume indicators
         df['volume_sma'] = df['volume'].rolling(20).mean()
         df['volume_ratio'] = df['volume'] / df['volume_sma'].replace(0, np.nan) 
         df['price_volume'] = df['close'] * df['volume']
         vol_sum = df['volume'].rolling(20).sum()
         df['vwap'] = df['price_volume'].rolling(20).sum() / vol_sum.replace(0, np.nan)
         
-        # 6. Volatility features
+        # 7. Volatility features
         for window in [5, 10, 20]:
             df[f'volatility_{window}'] = df['price_change'].rolling(window).std()
             vol_long = df[f'volatility_{window}'].rolling(50).mean()
             df[f'volatility_ratio_{window}'] = df[f'volatility_{window}'] / vol_long.replace(0, np.nan)
         
-        # 7. Momentum features
+        # 8. Momentum features
         for window in [5, 10, 20]:
             df[f'momentum_{window}'] = df['close'] / df['close'].shift(window) - 1
             df[f'roc_{window}'] = df['close'].pct_change(window)
         
-        # 8. Lag features
+        # 9. Lag features
         for lag in [1, 2, 3, 5, 10]:
             df[f'close_lag_{lag}'] = df['close'].shift(lag)
             df[f'volume_lag_{lag}'] = df['volume'].shift(lag)
             df[f'price_change_lag_{lag}'] = df['price_change'].shift(lag)
         
-        # 9. Rolling statistics
+        # 10. Rolling statistics
         for window in [5, 10, 20]:
             df[f'close_mean_{window}'] = df['close'].rolling(window).mean()
             df[f'close_std_{window}'] = df['close'].rolling(window).std()
             df[f'volume_mean_{window}'] = df['volume'].rolling(window).mean()
         
-        # 10. Time features
+        # 11. Time features
         if isinstance(df.index, pd.DatetimeIndex):
-            dates = df.index
+            df['hour'] = df.index.hour
+            df['day_of_week'] = df.index.dayofweek
+            df['day_of_month'] = df.index.day
+            df['is_weekend'] = (df.index.dayofweek >= 5).astype(int)
         elif 'timestamp' in df.columns:
             dates = pd.to_datetime(df['timestamp'])
+            df['hour'] = dates.dt.hour
+            df['day_of_week'] = dates.dt.dayofweek
+            df['day_of_month'] = dates.dt.day
+            df['is_weekend'] = (dates.dt.dayofweek >= 5).astype(int)
         else:
             logging.warning("No timestamp information found for time features")
-            dates = None
-
-        if dates is not None:
-            df['hour'] = dates.hour
-            df['day_of_week'] = dates.dayofweek
-            df['day_of_month'] = dates.day
-            df['is_weekend'] = (dates.dayofweek >= 5).astype(int)
         
-        # 11. Sentiment Features (Optional)
+        # 12. Sentiment Features (Optional)
         if sentiment_df is not None and not sentiment_df.empty:
             self._create_sentiment_features(df, sentiment_df)
         
@@ -322,6 +329,134 @@ class FeatureEngineer:
         
         # Trend strength score (normalized ADX)
         df['trend_strength'] = df['adx'] / 100
+
+    def _add_order_book_proxies(self, df: pd.DataFrame):
+        """
+        Add Order Book proxy features using volume data.
+        Since real order book data is not available, we proxy using volume patterns.
+        
+        Features:
+        - ob_imbalance_ma12: 12-period MA of volume imbalance proxy
+        - ob_imbalance_delta: Change in imbalance over 5 periods
+        - ob_spread_zscore: Z-score normalized price spread
+        """
+        # Volume imbalance proxy based on price direction and volume
+        price_direction = np.sign(df['close'] - df['open'])
+        ob_imbalance = price_direction * df['volume']
+        
+        df['ob_imbalance_ma12'] = ob_imbalance.rolling(12).mean()
+        df['ob_imbalance_delta'] = df['ob_imbalance_ma12'].diff(5)
+        
+        # Spread proxy using high-low range normalized
+        spread = (df['high'] - df['low']) / df['close']
+        spread_mean = spread.rolling(20).mean()
+        spread_std = spread.rolling(20).std().replace(0, np.nan)
+        df['ob_spread_zscore'] = (spread - spread_mean) / spread_std
+    
+    def _add_funding_rate_proxies(self, df: pd.DataFrame):
+        """
+        Add Funding Rate proxy features.
+        Since real funding rate data is not available, we proxy using momentum patterns.
+        
+        Features:
+        - funding_rate_zscore: Z-score of funding rate proxy (based on momentum)
+        - funding_cum_3d: 3-day cumulative funding proxy
+        """
+        # Funding rate proxy based on short-term momentum imbalance
+        # Positive momentum = long pressure = positive funding
+        momentum = df['close'].pct_change(4)  # ~4h momentum for funding
+        funding_proxy = momentum * 100  # Scale to typical funding range
+        
+        funding_mean = funding_proxy.rolling(24).mean()
+        funding_std = funding_proxy.rolling(24).std().replace(0, np.nan)
+        df['funding_rate_zscore'] = (funding_proxy - funding_mean) / funding_std
+        
+        # Cumulative funding over 3 days (~72 periods for hourly)
+        df['funding_cum_3d'] = funding_proxy.rolling(72).sum()
+    
+    def _add_open_interest_proxies(self, df: pd.DataFrame):
+        """
+        Add Open Interest proxy features.
+        Using volume as a proxy for OI changes.
+        
+        Features:
+        - oi_pct_change: Volume-based OI change proxy
+        - oi_sentiment: Sentiment based on OI proxy direction vs price direction
+        """
+        # OI proxy using volume changes
+        volume_ma = df['volume'].rolling(20).mean()
+        oi_proxy = df['volume'] / volume_ma.replace(0, np.nan)
+        
+        df['oi_pct_change'] = oi_proxy.pct_change(5)
+        
+        # OI sentiment: high volume with price up = bullish, high volume with price down = bearish
+        price_direction = np.sign(df['close'] - df['close'].shift(1))
+        volume_spike = (oi_proxy > 1.5).astype(int)
+        df['oi_sentiment'] = price_direction * volume_spike
+    
+    def _add_arbitrage_features(self, df: pd.DataFrame):
+        """
+        Add Arbitrage-related features.
+        Using price patterns to detect potential arbitrage conditions.
+        
+        Features:
+        - arb_exch_delta_pct: Exchange delta percentage proxy
+        - arb_delta_zscore: Z-score of arbitrage delta
+        - ext_price_roc: External price rate of change (lag proxy for external markets)
+        - arb_roc_divergence: ROC divergence between timeframes
+        """
+        # Arbitrage delta proxy using price deviation from moving average
+        ma_20 = df['close'].rolling(20).mean()
+        arb_delta = (df['close'] - ma_20) / ma_20.replace(0, np.nan) * 100
+        
+        df['arb_exch_delta_pct'] = arb_delta
+        
+        arb_mean = arb_delta.rolling(50).mean()
+        arb_std = arb_delta.rolling(50).std().replace(0, np.nan)
+        df['arb_delta_zscore'] = (arb_delta - arb_mean) / arb_std
+        
+        # External price ROC proxy (lagged ROC as if from another exchange)
+        df['ext_price_roc'] = df['close'].pct_change(10) * 100
+        
+        # ROC divergence between short and long term
+        roc_short = df['close'].pct_change(5)
+        roc_long = df['close'].pct_change(20)
+        df['arb_roc_divergence'] = roc_short - roc_long
+    
+    def _add_correlation_features(self, df: pd.DataFrame):
+        """
+        Add Correlation-based features.
+        Using auto-correlation and price pattern correlations.
+        
+        Features:
+        - corr_btc_eth: Correlation proxy (auto-correlation of returns)
+        - rel_strength: Relative strength vs historical performance
+        - corr_divergence: Correlation divergence signal
+        """
+        returns = df['close'].pct_change()
+        
+        # Auto-correlation as proxy for BTC/ETH correlation 
+        # (in real implementation, would need multi-symbol data)
+        df['corr_btc_eth'] = returns.rolling(20).apply(
+            lambda x: x[:-1].corr(pd.Series(x[1:])) if len(x) > 1 else np.nan, 
+            raw=False
+        )
+        
+        # Relative strength: current return vs rolling average
+        avg_return = returns.rolling(50).mean()
+        std_return = returns.rolling(50).std().replace(0, np.nan)
+        df['rel_strength'] = (returns - avg_return) / std_return
+        
+        # Correlation divergence: difference between short and long term correlations
+        short_corr = returns.rolling(10).apply(
+            lambda x: x[:-1].corr(pd.Series(x[1:])) if len(x) > 1 else np.nan,
+            raw=False
+        )
+        long_corr = returns.rolling(30).apply(
+            lambda x: x[:-1].corr(pd.Series(x[1:])) if len(x) > 1 else np.nan,
+            raw=False
+        )
+        df['corr_divergence'] = short_corr - long_corr
 
     def _create_sentiment_features(self, df: pd.DataFrame, sentiment_df: pd.DataFrame):
         """

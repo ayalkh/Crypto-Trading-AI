@@ -105,6 +105,6 @@
         "max_errors": 10,
         "error_cooldown_minutes": 30,
         "cleanup_interval_hours": 24,
-        "database_path": "data/multi_timeframe_data.db"
+        "database_path": "data/ml_crypto_data.db"
     }
 }

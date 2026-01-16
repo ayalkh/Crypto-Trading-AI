@@ -50,7 +50,7 @@ class CryptoAutomationScheduler:
         try:
             # Using subprocess to run the existing script
             # In a future refactor, this should call a python function directly
-            cmd = [sys.executable, 'multi_timeframe_collector.py']
+            cmd = [sys.executable, 'comprehensive_ml_collector_v2.py']
             
             # Check for force update logic (could be implemented here or in the script)
             # For now running standard collection

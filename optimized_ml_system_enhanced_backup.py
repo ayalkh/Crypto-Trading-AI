@@ -85,6 +85,22 @@ except ImportError:
     OPTUNA_AVAILABLE = False
     print("⚠️ Optuna not available. Install: pip install optuna")
 
+# GPU utilities
+try:
+    from crypto_ai.gpu_utils import (
+        detect_gpu_availability, get_xgboost_gpu_params, 
+        get_catboost_gpu_params, get_lightgbm_gpu_params,
+        configure_tensorflow_gpu, XGBOOST_GPU_AVAILABLE, 
+        CATBOOST_GPU_AVAILABLE, LIGHTGBM_GPU_AVAILABLE, TENSORFLOW_GPU_AVAILABLE
+    )
+    GPU_UTILS_AVAILABLE = True
+except ImportError:
+    GPU_UTILS_AVAILABLE = False
+    XGBOOST_GPU_AVAILABLE = False
+    CATBOOST_GPU_AVAILABLE = False
+    LIGHTGBM_GPU_AVAILABLE = False
+    TENSORFLOW_GPU_AVAILABLE = False
+
 
 class OptimizedCryptoMLSystem:
     """
@@ -137,6 +153,12 @@ class OptimizedCryptoMLSystem:
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
         logging.info(f"✅ TensorFlow: {DL_AVAILABLE}")
         logging.info(f"✅ Optuna: {OPTUNA_AVAILABLE}")
+        
+        # Detect and log GPU availability
+        if GPU_UTILS_AVAILABLE:
+            detect_gpu_availability(log_results=True)
+            if DL_AVAILABLE:
+                configure_tensorflow_gpu()
     
     def _setup_logging(self):
         """Setup logging to both console and file"""

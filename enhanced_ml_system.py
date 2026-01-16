@@ -56,6 +56,21 @@ except ImportError:
     OPTUNA_AVAILABLE = False
     print("⚠️ Optuna not available. Install: pip install optuna")
 
+# GPU utilities
+try:
+    from crypto_ai.gpu_utils import (
+        detect_gpu_availability, get_xgboost_gpu_params, 
+        get_catboost_gpu_params, get_lightgbm_gpu_params,
+        XGBOOST_GPU_AVAILABLE, CATBOOST_GPU_AVAILABLE,
+        LIGHTGBM_GPU_AVAILABLE
+    )
+    GPU_UTILS_AVAILABLE = True
+except ImportError:
+    GPU_UTILS_AVAILABLE = False
+    XGBOOST_GPU_AVAILABLE = False
+    CATBOOST_GPU_AVAILABLE = False
+    LIGHTGBM_GPU_AVAILABLE = False
+
 
 class EnhancedCryptoMLSystem:
     """
@@ -94,6 +109,10 @@ class EnhancedCryptoMLSystem:
         logging.info(f"   Hyperparameter Tuning: {use_hyperparameter_tuning}")
         if use_hyperparameter_tuning:
             logging.info(f"   Optuna Trials: {n_optuna_trials}")
+        
+        # Detect and log GPU availability
+        if GPU_UTILS_AVAILABLE:
+            detect_gpu_availability(log_results=True)
     
     def _setup_logging(self):
         """Setup logging"""
@@ -422,7 +441,18 @@ class EnhancedCryptoMLSystem:
                 params = self.best_params.get('lightgbm', {
                     'n_estimators': 500, 'learning_rate': 0.05, 'max_depth': 7
                 })
-                model = lgb.LGBMRegressor(**params, random_state=42, verbose=-1, force_col_wise=True)
+                
+                # Add GPU parameters if available
+                lgb_params = params.copy()
+                lgb_kwargs = {'random_state': 42, 'verbose': -1}
+                
+                if LIGHTGBM_GPU_AVAILABLE:
+                    lgb_params.update({'device': 'gpu'})
+                    logging.info("   🖥️  Using LightGBM GPU acceleration")
+                else:
+                    lgb_kwargs['force_col_wise'] = True
+                    
+                model = lgb.LGBMRegressor(**lgb_params, **lgb_kwargs)
                 model.fit(X_train_full_scaled, y_train_full)
                 
                 pred = model.predict(X_test_scaled)
@@ -441,6 +471,9 @@ class EnhancedCryptoMLSystem:
                 params = self.best_params.get('xgboost', {
                     'n_estimators': 500, 'learning_rate': 0.05, 'max_depth': 6
                 })
+                # Add GPU parameters if available
+                if XGBOOST_GPU_AVAILABLE:
+                    params.update({'tree_method': 'hist', 'device': 'cuda'})
                 model = xgb.XGBRegressor(**params, random_state=42, verbosity=0)
                 model.fit(X_train_full_scaled, y_train_full)
                 
@@ -460,6 +493,9 @@ class EnhancedCryptoMLSystem:
                 params = self.best_params.get('catboost', {
                     'iterations': 500, 'learning_rate': 0.05, 'depth': 6
                 })
+                # Add GPU parameters if available
+                if CATBOOST_GPU_AVAILABLE:
+                    params['task_type'] = 'GPU'
                 model = cb.CatBoostRegressor(**params, random_seed=42, verbose=False)
                 model.fit(X_train_full_scaled, y_train_full)
                 

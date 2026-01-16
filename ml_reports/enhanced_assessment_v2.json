@@ -1,0 +1,150 @@
+{
+  "timestamp": "2026-01-15T19:11:28.842198",
+  "config": {
+    "hyperparameter_tuning": true,
+    "n_optuna_trials": 15,
+    "feature_selection": 50
+  },
+  "results": {
+    "BTC/USDT_15m": {
+      "lightgbm": {
+        "accuracy": 0.5099648300117233,
+        "precision": 0.5128805620608899,
+        "recall": 0.5104895104895105,
+        "f1": 0.5116822429906542,
+        "best_params": {
+          "n_estimators": 133,
+          "learning_rate": 0.06390539996236372,
+          "max_depth": 6,
+          "num_leaves": 50,
+          "reg_alpha": 0.13628185030722006,
+          "reg_lambda": 0.8236822124139324
+        }
+      },
+      "xgboost": {
+        "accuracy": 0.5240328253223916,
+        "precision": 0.5313351498637602,
+        "recall": 0.45454545454545453,
+        "f1": 0.4899497487437186,
+        "best_params": {
+          "n_estimators": 320,
+          "learning_rate": 0.01434408440316677,
+          "max_depth": 4,
+          "subsample": 0.8285938945749921,
+          "colsample_bytree": 0.9331684163115734
+        }
+      },
+      "ensemble": {
+        "accuracy": 0.5076201641266119,
+        "precision": 0.5116279069767442,
+        "recall": 0.46153846153846156,
+        "f1": 0.4852941176470588
+      }
+    },
+    "ETH/USDT_15m": {
+      "lightgbm": {
+        "accuracy": 0.5263774912075029,
+        "precision": 0.5348189415041783,
+        "recall": 0.44755244755244755,
+        "f1": 0.4873096446700508,
+        "best_params": {
+          "n_estimators": 463,
+          "learning_rate": 0.1714926140134757,
+          "max_depth": 9,
+          "num_leaves": 17,
+          "reg_alpha": 0.9543944113541662,
+          "reg_lambda": 0.9853262392230665
+        }
+      },
+      "xgboost": {
+        "accuracy": 0.5228604923798359,
+        "precision": 0.5319767441860465,
+        "recall": 0.42657342657342656,
+        "f1": 0.47347994825355755,
+        "best_params": {
+          "n_estimators": 172,
+          "learning_rate": 0.027056566883113746,
+          "max_depth": 4,
+          "subsample": 0.7512879456957664,
+          "colsample_bytree": 0.6103708029307797
+        }
+      },
+      "ensemble": {
+        "accuracy": 0.52989449003517,
+        "precision": 0.5402298850574713,
+        "recall": 0.4382284382284382,
+        "f1": 0.4839124839124839
+      }
+    },
+    "BTC/USDT_4h": {
+      "lightgbm": {
+        "accuracy": 0.5628930817610063,
+        "precision": 0.6111111111111112,
+        "recall": 0.5657142857142857,
+        "f1": 0.5875370919881305,
+        "best_params": {
+          "n_estimators": 232,
+          "learning_rate": 0.05162809554966346,
+          "max_depth": 10,
+          "num_leaves": 42,
+          "reg_alpha": 0.3613235911900573,
+          "reg_lambda": 0.8162227022657454
+        }
+      },
+      "xgboost": {
+        "accuracy": 0.5062893081761006,
+        "precision": 0.5478723404255319,
+        "recall": 0.5885714285714285,
+        "f1": 0.5674931129476584,
+        "best_params": {
+          "n_estimators": 175,
+          "learning_rate": 0.15673946445531695,
+          "max_depth": 6,
+          "subsample": 0.8252914742066925,
+          "colsample_bytree": 0.7334906952091633
+        }
+      },
+      "ensemble": {
+        "accuracy": 0.5031446540880503,
+        "precision": 0.546448087431694,
+        "recall": 0.5714285714285714,
+        "f1": 0.5586592178770949
+      }
+    },
+    "ETH/USDT_4h": {
+      "lightgbm": {
+        "accuracy": 0.49056603773584906,
+        "precision": 0.5380116959064327,
+        "recall": 0.5257142857142857,
+        "f1": 0.5317919075144508,
+        "best_params": {
+          "n_estimators": 173,
+          "learning_rate": 0.11098807262860043,
+          "max_depth": 9,
+          "num_leaves": 25,
+          "reg_alpha": 0.35340954391179336,
+          "reg_lambda": 0.3160268458419042
+        }
+      },
+      "xgboost": {
+        "accuracy": 0.5,
+        "precision": 0.551948051948052,
+        "recall": 0.4857142857142857,
+        "f1": 0.5167173252279635,
+        "best_params": {
+          "n_estimators": 124,
+          "learning_rate": 0.015684117211519907,
+          "max_depth": 5,
+          "subsample": 0.6189872041807842,
+          "colsample_bytree": 0.7538610589621582
+        }
+      },
+      "ensemble": {
+        "accuracy": 0.5314465408805031,
+        "precision": 0.5822784810126582,
+        "recall": 0.5257142857142857,
+        "f1": 0.5525525525525525
+      }
+    }
+  }
+}

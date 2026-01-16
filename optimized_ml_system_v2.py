@@ -56,6 +56,18 @@ except ImportError:
     OPTUNA_AVAILABLE = False
     print("⚠️ Optuna not available. Install: pip install optuna")
 
+try:
+    from crypto_ai.gpu_utils import (
+        detect_gpu_availability, get_xgboost_gpu_params, 
+        get_catboost_gpu_params, XGBOOST_GPU_AVAILABLE, 
+        CATBOOST_GPU_AVAILABLE
+    )
+    GPU_UTILS_AVAILABLE = True
+except ImportError:
+    GPU_UTILS_AVAILABLE = False
+    XGBOOST_GPU_AVAILABLE = False
+    CATBOOST_GPU_AVAILABLE = False
+
 
 class OptimizedMLSystemV2:
     """
@@ -106,6 +118,9 @@ class OptimizedMLSystemV2:
         logging.info(f"✅ XGBoost: {XGBOOST_AVAILABLE}")
         logging.info(f"✅ CatBoost: {CATBOOST_AVAILABLE}")
         logging.info(f"✅ Optuna: {OPTUNA_AVAILABLE}")
+        
+        if GPU_UTILS_AVAILABLE:
+            detect_gpu_availability()
     
     def _setup_logging(self):
         """Setup logging to both console and file"""
@@ -323,6 +338,7 @@ class OptimizedMLSystemV2:
         
         # Drop NaN values
         initial_len = len(df)
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
         df.dropna(inplace=True)
         dropped = initial_len - len(df)
         
@@ -409,6 +425,9 @@ class OptimizedMLSystemV2:
                     'random_seed': 42,
                     'verbose': False
                 }
+                # Add GPU params
+                if GPU_UTILS_AVAILABLE:
+                    params.update(get_catboost_gpu_params())
                 
                 if task == 'classification':
                     model = cb.CatBoostClassifier(**params)
@@ -429,6 +448,9 @@ class OptimizedMLSystemV2:
                     'random_state': 42,
                     'verbosity': 0
                 }
+                # Add GPU params
+                if GPU_UTILS_AVAILABLE:
+                    params.update(get_xgboost_gpu_params())
                 
                 if task == 'classification':
                     model = xgb.XGBClassifier(**params)
@@ -454,7 +476,7 @@ class OptimizedMLSystemV2:
     def _get_default_params(self, model_type: str, task: str) -> Dict:
         """Get default parameters if Optuna is not available"""
         if model_type == 'catboost':
-            return {
+            params = {
                 'iterations': 500,
                 'learning_rate': 0.05,
                 'depth': 6,
@@ -462,8 +484,11 @@ class OptimizedMLSystemV2:
                 'random_seed': 42,
                 'verbose': False
             }
+            if GPU_UTILS_AVAILABLE:
+                params.update(get_catboost_gpu_params())
+            return params
         elif model_type == 'xgboost':
-            return {
+            params = {
                 'n_estimators': 500,
                 'learning_rate': 0.05,
                 'max_depth': 6,
@@ -476,6 +501,9 @@ class OptimizedMLSystemV2:
                 'random_state': 42,
                 'verbosity': 0
             }
+            if GPU_UTILS_AVAILABLE:
+                params.update(get_xgboost_gpu_params())
+            return params
     
     def save_optimal_params(self, symbol: str, timeframe: str, model_type: str, task: str, params: Dict):
         """Save optimal parameters to config file"""
@@ -609,6 +637,10 @@ class OptimizedMLSystemV2:
                 if best_params is None:
                     best_params = self._get_default_params('catboost', task_type)
             
+            # Ensure GPU params are included
+            if GPU_UTILS_AVAILABLE:
+                best_params.update(get_catboost_gpu_params())
+            
             # Train model
             if task_type == 'classification':
                 cb_model = cb.CatBoostClassifier(**best_params)
@@ -646,6 +678,10 @@ class OptimizedMLSystemV2:
                 best_params = self.load_optimal_params(symbol, timeframe, 'xgboost', task)
                 if best_params is None:
                     best_params = self._get_default_params('xgboost', task_type)
+            
+            # Ensure GPU params are included
+            if GPU_UTILS_AVAILABLE:
+                best_params.update(get_xgboost_gpu_params())
             
             # Train model
             if task_type == 'classification':

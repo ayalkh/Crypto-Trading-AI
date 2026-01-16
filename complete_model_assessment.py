@@ -22,7 +22,13 @@ from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from crypto_ai.features import FeatureEngineer
 import lightgbm as lgb
 import xgboost as xgb
-import catboost as cb
+try:
+    import catboost as cb
+    CB_AVAILABLE = True
+except ImportError:
+    CB_AVAILABLE = False
+    print("⚠️ CatBoost not available")
+
 
 try:
     from tensorflow.keras.models import load_model, Sequential
@@ -165,29 +171,32 @@ def train_and_evaluate_all_models(symbol, timeframe, db_path='data/ml_crypto_dat
           f"F1: {results['xgboost']['f1']:.2%}")
     
     # ========== 3. CatBoost ==========
-    print("\n3️⃣  CatBoost...")
-    cb_model = cb.CatBoostClassifier(
-        iterations=300, learning_rate=0.05, depth=6,
-        random_seed=42, verbose=False
-    )
-    cb_model.fit(X_train_s, y_train, eval_set=(X_val_s, y_val),
-                early_stopping_rounds=50, verbose=False)
-    
-    cb_pred = cb_model.predict(X_test_s)
-    cb_proba = cb_model.predict_proba(X_test_s)[:, 1]
-    
-    results['catboost'] = {
-        'accuracy': accuracy_score(y_test, cb_pred),
-        'precision': precision_score(y_test, cb_pred, zero_division=0),
-        'recall': recall_score(y_test, cb_pred, zero_division=0),
-        'f1': f1_score(y_test, cb_pred, zero_division=0)
-    }
-    test_predictions['catboost'] = cb_proba
-    
-    print(f"   Acc: {results['catboost']['accuracy']:.2%}, "
-          f"Prec: {results['catboost']['precision']:.2%}, "
-          f"Rec: {results['catboost']['recall']:.2%}, "
-          f"F1: {results['catboost']['f1']:.2%}")
+    if CB_AVAILABLE:
+        print("\n3️⃣  CatBoost...")
+        cb_model = cb.CatBoostClassifier(
+            iterations=300, learning_rate=0.05, depth=6,
+            random_seed=42, verbose=False
+        )
+        cb_model.fit(X_train_s, y_train, eval_set=(X_val_s, y_val),
+                    early_stopping_rounds=50, verbose=False)
+        
+        cb_pred = cb_model.predict(X_test_s)
+        cb_proba = cb_model.predict_proba(X_test_s)[:, 1]
+        
+        results['catboost'] = {
+            'accuracy': accuracy_score(y_test, cb_pred),
+            'precision': precision_score(y_test, cb_pred, zero_division=0),
+            'recall': recall_score(y_test, cb_pred, zero_division=0),
+            'f1': f1_score(y_test, cb_pred, zero_division=0)
+        }
+        test_predictions['catboost'] = cb_proba
+        
+        print(f"   Acc: {results['catboost']['accuracy']:.2%}, "
+              f"Prec: {results['catboost']['precision']:.2%}, "
+              f"Rec: {results['catboost']['recall']:.2%}, "
+              f"F1: {results['catboost']['f1']:.2%}")
+    else:
+        print("\n3️⃣  CatBoost (Skipped - Not Installed)")
     
     # ========== 4. GRU (only for 4h) ==========
     if timeframe == '4h' and DL_AVAILABLE and len(df) >= 200:
@@ -374,7 +383,7 @@ def train_and_evaluate_all_models(symbol, timeframe, db_path='data/ml_crypto_dat
                 val_pred = lgb_model.predict(X_val_s)
             elif name == 'xgboost':
                 val_pred = xgb_model.predict(X_val_s)
-            else:
+            elif name == 'catboost' and CB_AVAILABLE:
                 val_pred = cb_model.predict(X_val_s)
             val_accuracies[name] = accuracy_score(y_val, val_pred)
         else:
