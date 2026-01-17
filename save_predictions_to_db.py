@@ -10,7 +10,7 @@ import logging
 import traceback
 
 # Import your existing system
-from optimized_ml_system import OptimizedCryptoMLSystem
+from optimized_ml_system_v2 import OptimizedMLSystemV2 as OptimizedCryptoMLSystem
 
 # Setup detailed logging
 logging.basicConfig(

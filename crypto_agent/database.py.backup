@@ -18,46 +18,12 @@ class AgentDatabase:
     def __init__(self, db_path: str = DB_PATH):
         """Initialize database connection"""
         self.db_path = db_path
-        self._create_ml_predictions_table()  # FIX: Create table
         logger.info(f"📊 Database initialized: {db_path}")
     
     def get_connection(self):
         """Get database connection"""
         return sqlite3.connect(self.db_path)
     
-
-    
-    def _create_ml_predictions_table(self):
-        """Create ml_predictions table if it doesn't exist"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS ml_predictions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        symbol TEXT NOT NULL,
-                        timeframe TEXT NOT NULL,
-                        timestamp DATETIME NOT NULL,
-                        target_timestamp DATETIME,
-                        model_type TEXT NOT NULL,
-                        predicted_price REAL,
-                        predicted_direction TEXT,
-                        direction_probability REAL,
-                        predicted_change_pct REAL,
-                        confidence_score REAL,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_predictions_symbol_timeframe 
-                    ON ml_predictions(symbol, timeframe, timestamp DESC)
-                """)
-                
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Error creating ml_predictions table: {e}")
-
     def get_latest_price(self, symbol: str, timeframe: str = '1h') -> Optional[float]:
         """Get latest price for a symbol"""
         try:
