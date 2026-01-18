@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # ML Models and Training Data - DO NOT UPLOAD
-ml_models/
+
 data/
 catboost_info/
 
