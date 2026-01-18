@@ -171,13 +171,13 @@ class SmartConsensusAnalyzer:
         weighted_price_change = weighted_price_sum / total_weight
         
         # Determine recommendation based on weighted change
-        if weighted_price_change > 0.003:  # > 0.3%
+        if weighted_price_change > 0.01:  # > 1%
             recommendation = 'STRONG_BUY'
-        elif weighted_price_change > 0.001:  # > 0.1%
+        elif weighted_price_change > 0.005:  # > 0.5%
             recommendation = 'BUY'
-        elif weighted_price_change < -0.003:  # < -0.3%
+        elif weighted_price_change < -0.01:  # < -1%
             recommendation = 'STRONG_SELL'
-        elif weighted_price_change < -0.001:  # < -0.1%
+        elif weighted_price_change < -0.005:  # < -0.5%
             recommendation = 'SELL'
         else:
             recommendation = 'HOLD'
@@ -194,9 +194,8 @@ class SmartConsensusAnalyzer:
         agreement_rate = max_agreement / total_models if total_models > 0 else 0
         
         # Confidence is combination of agreement and magnitude
-        # Scale magnitude confidence more aggressively for small changes
-        magnitude_confidence = min(abs(weighted_price_change) * 100, 1.0)  # Amplify small changes
-        confidence = (agreement_rate * 0.5 + magnitude_confidence * 0.5)
+        magnitude_confidence = min(abs(weighted_price_change) * 10, 1.0)  # Max 1.0
+        confidence = (agreement_rate * 0.6 + magnitude_confidence * 0.4)
         
         # Check multi-timeframe alignment (if we have predictions)
         alignment_score = self._check_timeframe_alignment(
