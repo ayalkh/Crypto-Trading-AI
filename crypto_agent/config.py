@@ -1,6 +1,6 @@
 """
-Configuration for Crypto Trading Agent
-Centralized settings for easy modification
+Configuration for Crypto Trading Agent - FIXED VERSION
+Matches actual 2-model setup (catboost + xgboost)
 """
 
 # Database configuration
@@ -10,45 +10,38 @@ DB_PATH = 'data/ml_crypto_data.db'
 AGENT_CONFIG = {
     'name': 'CryptoTradingAdvisor',
     'version': '1.0.0',
-    'max_iterations': 10,  # Max conversation turns
-    'temperature': 0.7,    # LLM creativity (0-1)
+    'max_iterations': 10,
+    'temperature': 0.7,
 }
 
-# Model weights by timeframe (for Smart Consensus Analyzer)
+# ============================================================================
+# CRITICAL FIX: Model weights by timeframe
+# UPDATED: UPPERCASE to match database storage (CATBOOST, XGBOOST)
+# ============================================================================
 MODEL_WEIGHTS = {
     '5m': {
-        'lightgbm': 0.50,
-        'xgboost': 0.30,
-        'catboost': 0.20,
-        'gru': 0.00
+        'CATBOOST': 0.55,  # CatBoost slightly favored
+        'XGBOOST': 0.45
     },
     '15m': {
-        'lightgbm': 0.50,
-        'xgboost': 0.30,
-        'catboost': 0.20,
-        'gru': 0.00
+        'CATBOOST': 0.55,
+        'XGBOOST': 0.45
     },
     '1h': {
-        'lightgbm': 0.50,
-        'xgboost': 0.30,
-        'catboost': 0.20,
-        'gru': 0.00
+        'CATBOOST': 0.52,
+        'XGBOOST': 0.48
     },
     '4h': {
-        'lightgbm': 0.45,
-        'xgboost': 0.30,
-        'catboost': 0.15,
-        'gru': 0.10  # GRU only for 4h
+        'CATBOOST': 0.58,  # CatBoost better on longer timeframes
+        'XGBOOST': 0.42
     },
     '1d': {
-        'lightgbm': 0.50,
-        'xgboost': 0.30,
-        'catboost': 0.20,
-        'gru': 0.00
+        'CATBOOST': 0.60,
+        'XGBOOST': 0.40
     }
 }
 
-# Trade quality scoring weights (total = 100%)
+# Trade quality scoring weights (total = 100)
 QUALITY_WEIGHTS = {
     'model_consensus': 15,      # How many models agree
     'historical_winrate': 15,   # Past performance at this confidence
@@ -61,14 +54,42 @@ QUALITY_WEIGHTS = {
     'btc_correlation': 5        # Independent or following BTC
 }
 
-# Signal thresholds
+# ============================================================================
+# CRITICAL FIX: Signal thresholds for price change (in DECIMAL form)
+# OLD: Used quality scores (80, 65, etc.) - WRONG!
+# NEW: Use actual price change thresholds calibrated for crypto
+# ============================================================================
 SIGNAL_THRESHOLDS = {
-    'strong_buy': 80,
-    'buy': 65,
-    'hold_upper': 55,
-    'hold_lower': 45,
-    'sell': 35,
-    'strong_sell': 20
+    '5m': {
+        'strong_buy': 0.0004,   # 0.04% for 5m
+        'buy': 0.0002,          # 0.02%
+        'sell': -0.0002,
+        'strong_sell': -0.0004
+    },
+    '15m': {
+        'strong_buy': 0.0005,   # 0.05%
+        'buy': 0.00025,         # 0.025%
+        'sell': -0.00025,
+        'strong_sell': -0.0005
+    },
+    '1h': {
+        'strong_buy': 0.0008,   # 0.08%
+        'buy': 0.0003,          # 0.03%
+        'sell': -0.0003,
+        'strong_sell': -0.0008
+    },
+    '4h': {
+        'strong_buy': 0.0015,   # 0.15%
+        'buy': 0.0006,          # 0.06%
+        'sell': -0.0006,
+        'strong_sell': -0.0015
+    },
+    '1d': {
+        'strong_buy': 0.0030,   # 0.30%
+        'buy': 0.0012,          # 0.12%
+        'sell': -0.0012,
+        'strong_sell': -0.0030
+    }
 }
 
 # Market regime detection
@@ -101,7 +122,7 @@ TIMEFRAME_WEIGHTS = {
     '1d': 15
 }
 
-# Prediction clipping limits (from Priority 1 fixes)
+# Prediction clipping limits (max allowed price change per timeframe)
 PREDICTION_LIMITS = {
     '5m': 0.02,   # 2% max
     '15m': 0.03,  # 3% max
@@ -116,3 +137,20 @@ LOGGING_CONFIG = {
     'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     'file': 'logs/crypto_agent.log'
 }
+
+# ============================================================================
+# KEY CHANGES MADE:
+# ============================================================================
+# 1. MODEL_WEIGHTS: Removed lightgbm and gru (you don't have these models)
+#    - Now only catboost + xgboost with proper weight distribution
+#
+# 2. SIGNAL_THRESHOLDS: Changed from quality scores to price change decimals
+#    - OLD: {'strong_buy': 80, 'buy': 65, ...} ← These were quality scores!
+#    - NEW: Timeframe-specific price change thresholds in decimal form
+#    - Example: 0.0006 = 0.06% price change
+#
+# These fixes ensure:
+# ✅ Only actual models get weighted (no missing model issue)
+# ✅ Thresholds match your model predictions (0.01-0.2% range)
+# ✅ Different sensitivity per timeframe (5m more sensitive than 4h)
+# ============================================================================

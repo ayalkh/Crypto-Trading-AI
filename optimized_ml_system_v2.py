@@ -796,7 +796,7 @@ class OptimizedMLSystemV2:
         
         # Calculate ensemble price prediction
         if price_preds:
-            ensemble_price_change = sum(p * weights[m] for p, m in zip(price_preds, ['catboost', 'xgboost']))
+            ensemble_price_change = sum(p * weights[m] for p, m in zip (price_preds, ['catboost', 'xgboost']))
             
             # Clip predictions
             prediction_limits = {'5m': 0.02, '15m': 0.03, '1h': 0.05, '4h': 0.10, '1d': 0.15}

@@ -21,7 +21,7 @@ def main():
     agent = CryptoTradingAgent()
     print("✅ Agent ready!\n")
     
-    # Get market overview (this method definitely exists based on test_agent.py)
+    # Get market overview
     print("="*70)
     print("🌍 GETTING MARKET OVERVIEW")
     print("="*70 + "\n")
@@ -30,12 +30,14 @@ def main():
         overview = agent.get_market_overview()
         
         # Display market context
-        print(f"📊 Market Regime: {overview['market_regime']}")
-        print(f"   Confidence: {overview.get('regime_confidence', 0):.0%}")
-        print(f"⚠️  Risk Level: {overview['risk_level']}")
-        print(f"🎯 Symbols Analyzed: {len(overview.get('symbol_analysis', []))}")
+        market_context = overview.get('market_regime', 'Unknown')
+        risk_level = overview.get('risk_level', 'UNKNOWN')
         
-        # Check for opportunities
+        print(f"📊 Market Regime: {market_context}")
+        print(f"⚠️  Risk Level: {risk_level}")
+        print(f"🎯 Symbols Analyzed: {overview.get('symbols_analyzed', 0)}")
+        
+        # Get opportunities
         top_opps = overview.get('top_opportunities', [])
         
         print(f"\n{'='*70}")
@@ -46,68 +48,95 @@ def main():
             print(f"\n✅ Found {len(top_opps)} opportunities:\n")
             
             for i, opp in enumerate(top_opps, 1):
-                print(f"{i}. {opp['symbol']} {opp['timeframe']}")
-                print(f"   Recommendation: {opp['recommendation']}")
-                print(f"   Quality: {opp.get('quality', 'N/A')}/100")
-                print(f"   Confidence: {opp.get('confidence', 0):.1%}")
+                symbol = opp['symbol']
+                timeframe = opp['timeframe']
+                recommendation = opp['recommendation']
+                quality_score = opp.get('quality_score', 0)  # FIXED: was 'quality'
+                confidence = opp.get('confidence', 0)
                 
-                if opp.get('should_trade'):
-                    print(f"   ✅ TRADE THIS")
+                # Determine if tradeable based on quality threshold
+                should_trade = quality_score >= 50 and confidence >= 0.50
+                
+                # Emoji for recommendation
+                emoji = {
+                    'STRONG_BUY': '🟢🟢',
+                    'BUY': '🟢',
+                    'HOLD': '🟡',
+                    'SELL': '🔴',
+                    'STRONG_SELL': '🔴🔴'
+                }.get(recommendation, '⚪')
+                
+                print(f"{i}. {emoji} {symbol} {timeframe}")
+                print(f"   Recommendation: {recommendation}")
+                print(f"   Quality: {quality_score}/100")
+                print(f"   Confidence: {confidence:.1%}")
+                
+                if should_trade and recommendation not in ['HOLD']:
+                    print(f"   ✅ TRADEABLE SIGNAL")
                 else:
-                    print(f"   ⚠️  DO NOT TRADE - Conditions not met")
+                    reasons = []
+                    if quality_score < 50:
+                        reasons.append(f"Quality too low ({quality_score}/100, need 50+)")
+                    if confidence < 0.50:
+                        reasons.append(f"Confidence too low ({confidence:.0%})")
+                    if recommendation == 'HOLD':
+                        reasons.append("Recommendation is HOLD")
+                    
+                    print(f"   ⚠️  SKIP: {', '.join(reasons) if reasons else 'Unknown reason'}")
                 print()
+            
+            # Show detailed analysis for top tradeable opportunity
+            tradeable = [o for o in top_opps 
+                        if o.get('quality_score', 0) >= 50 
+                        and o.get('confidence', 0) >= 0.50
+                        and o['recommendation'] not in ['HOLD']]
+            
+            if tradeable:
+                print(f"\n{'='*70}")
+                print("🎯 DETAILED ANALYSIS - TOP OPPORTUNITY")
+                print('='*70 + "\n")
+                
+                top = tradeable[0]
+                
+                # Get full analysis for this opportunity
+                try:
+                    full_analysis = agent.analyze_trading_opportunity(
+                        top['symbol'], 
+                        top['timeframe'],
+                        save_recommendation=False
+                    )
+                    
+                    # Display formatted recommendation
+                    print(agent.format_recommendation(full_analysis))
+                    
+                except Exception as e:
+                    print(f"⚠️  Could not get detailed analysis: {e}")
+        
         else:
             print("\n⚠️  No high-quality trading opportunities right now\n")
             print("   Current Market Status:")
-            print(f"   • Regime: {overview['market_regime']}")
-            print(f"   • Risk: {overview['risk_level']}")
+            print(f"   • Regime: {market_context}")
+            print(f"   • Risk: {risk_level}")
             print("\n   Why no opportunities?")
             print("   • Market is ranging (no clear trend)")
             print("   • Models predict NEUTRAL")
-            print("   • Quality scores below 60/100 threshold")
+            print("   • Quality scores below threshold")
             print("\n   ✅ This is GOOD - agent protects you from uncertain trades!")
-            print("   📅 Try again later when conditions improve.\n")
-        
-        # Show all symbol analysis if available
-        if overview.get('symbol_analysis'):
-            print(f"\n{'='*70}")
-            print("📈 DETAILED SYMBOL ANALYSIS")
-            print('='*70 + "\n")
-            
-            for sym_data in overview['symbol_analysis']:
-                symbol = sym_data['symbol']
-                print(f"\n{symbol}:")
-                
-                for tf_data in sym_data.get('timeframes', []):
-                    tf = tf_data['timeframe']
-                    rec = tf_data.get('recommendation', 'N/A')
-                    qual = tf_data.get('quality_score', 0)
-                    conf = tf_data.get('confidence', 0)
-                    
-                    status = "✅" if tf_data.get('should_trade') else "⚠️"
-                    print(f"  {status} {tf}: {rec} (Q:{qual}/100, C:{conf:.0%})")
+            print("   📅 Try again later when conditions improve.")
         
     except Exception as e:
         print(f"❌ Error getting market overview: {e}")
-        print("\nTrying alternative approach...\n")
-        
-        # Alternative: Try direct database queries if agent methods fail
-        try:
-            print("Checking latest predictions from database...")
-            # This would need to access agent.db directly
-            # But for now, show the error
-            import traceback
-            traceback.print_exc()
-        except:
-            pass
+        import traceback
+        traceback.print_exc()
     
     print("\n" + "="*70)
     print("💡 TIPS")
     print("="*70)
     print("• Run this daily to catch opportunities")
     print("• Quality 70+ = Strong signals")
-    print("• Quality 60-69 = Acceptable")
-    print("• Below 60 = Don't trade")
+    print("• Quality 60-69 = Acceptable")  
+    print("• Quality 50-59 = Marginal (use small positions)")
+    print("• Below 50 = Don't trade")
     print("="*70 + "\n")
 
 if __name__ == "__main__":

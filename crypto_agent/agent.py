@@ -220,11 +220,11 @@ class CryptoTradingAgent:
         adjusted_confidence = base_confidence
         risk_factors = []
         
-        # Rule 1: Quality threshold
-        if quality_score < 60:
+        # Rule 1: Quality threshold - FIXED to 50
+        if quality_score < 50:
             should_trade = False
             adjusted_action = 'HOLD'
-            risk_factors.append(f"Quality score too low ({quality_score}/100, need 60+)")
+            risk_factors.append(f"Quality score too low ({quality_score}/100, need 50+)")
         
         # Rule 2: Confidence threshold
         if base_confidence < 0.50:
@@ -436,7 +436,8 @@ class CryptoTradingAgent:
                     if consensus['confidence'] > 0.6:
                         quality = self.quality_scorer.score(symbol, timeframe, consensus)
                         
-                        if quality['quality_score'] >= 70:
+                        # FIXED: Changed from 70 to 60 to find more opportunities
+                        if quality['quality_score'] >= 60:
                             opportunities.append({
                                 'symbol': symbol,
                                 'timeframe': timeframe,
@@ -528,12 +529,21 @@ class CryptoTradingAgent:
                 lines.append(f"   - {risk}")
         
         # Trading details (if should trade)
-        if should_trade and analysis['stop_loss']:
+        if should_trade and analysis.get('stop_loss'):
             lines.append(f"\n💼 Trading Plan:")
             pos_min, pos_max = analysis['position_sizing']
             lines.append(f"   Position Size: {pos_min:.1f}% - {pos_max:.1f}% of portfolio")
-            lines.append(f"   Stop Loss: ${analysis['stop_loss']:,.2f} ({analysis['stop_loss_pct']:.1%})")
-            lines.append(f"   Take Profit: ${analysis['take_profit']:,.2f} ({analysis['take_profit_pct']:.1%})")
+            
+            # Calculate stop loss and take profit percentages from prices
+            current_price = self.db.get_latest_price(symbol, timeframe)
+            if current_price:
+                stop_loss_pct = abs(analysis['stop_loss'] - current_price) / current_price
+                take_profit_pct = abs(analysis['take_profit'] - current_price) / current_price
+                lines.append(f"   Stop Loss: ${analysis['stop_loss']:,.2f} ({stop_loss_pct:.1%})")
+                lines.append(f"   Take Profit: ${analysis['take_profit']:,.2f} ({take_profit_pct:.1%})")
+            else:
+                lines.append(f"   Stop Loss: ${analysis['stop_loss']:,.2f}")
+                lines.append(f"   Take Profit: ${analysis['take_profit']:,.2f}")
         
         # Market context
         market = analysis['market_context']
