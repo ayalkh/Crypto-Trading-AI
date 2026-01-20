@@ -115,7 +115,7 @@ class AgentDatabase:
                     return pd.DataFrame()
                 
                 # Get latest prediction from each model type
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], format='ISO8601')
                 latest_predictions = df.sort_values('timestamp', ascending=False).groupby('model_type').first().reset_index()
                 
                 logger.info(f"📊 Found {len(latest_predictions)} model predictions for {symbol} {timeframe}")

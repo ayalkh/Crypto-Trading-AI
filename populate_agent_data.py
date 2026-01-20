@@ -265,6 +265,31 @@ def populate_sample_technical_indicators(db_path: str = "data/ml_crypto_data.db"
         # Volume
         df['volume_sma_20'] = df['volume'].rolling(window=20).mean()
         df['volume_ratio'] = df['volume'] / df['volume_sma_20']
+
+        # ADX Calculation
+        # 1. Directional Movement
+        up = df['high'] - df['high'].shift(1)
+        down = df['low'].shift(1) - df['low']
+        
+        plus_dm = np.where((up > down) & (up > 0), up, 0.0)
+        minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+        
+        df['plus_dm'] = plus_dm
+        df['minus_dm'] = minus_dm
+        
+        # 2. Smooth TR and DM (using EWMA for Wilder's smoothing approximation)
+        # alpha = 1/14 for standard ADX
+        alpha = 1/14
+        df['tr_smooth'] = df['atr_14'] * 14 # Reconstruct approximate TR sum or just use standard RMA
+        # Better to just use ewm
+        df['tr_ewm'] = true_range.ewm(alpha=alpha, adjust=False).mean()
+        df['plus_di'] = 100 * (pd.Series(plus_dm).ewm(alpha=alpha, adjust=False).mean() / df['tr_ewm'])
+        df['minus_di'] = 100 * (pd.Series(minus_dm).ewm(alpha=alpha, adjust=False).mean() / df['tr_ewm'])
+        
+        # 3. DX and ADX
+        dx = 100 * np.abs(df['plus_di'] - df['minus_di']) / (df['plus_di'] + df['minus_di'])
+        df['adx'] = dx.ewm(alpha=alpha, adjust=False).mean()
+
         
         # Take most recent 20 records with valid indicators
         recent_df = df.tail(20).dropna()
@@ -294,7 +319,8 @@ def populate_sample_technical_indicators(db_path: str = "data/ml_crypto_data.db"
                 'atr_14': float(record['atr_14']),
                 'atr_percent': float(record['atr_percent']),
                 'volume_sma_20': float(record['volume_sma_20']),
-                'volume_ratio': float(record['volume_ratio'])
+                'volume_ratio': float(record['volume_ratio']),
+                'adx': float(record['adx'])
             }
             
             indicator_records.append(indicator_record)
