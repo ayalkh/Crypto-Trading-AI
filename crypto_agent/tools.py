@@ -1,5 +1,5 @@
 """
-Trading Agent Tools - FIXED VERSION
+Trading Agent Tools - FIBONACCI & LEVERAGE ENHANCED
 Fixed threshold calibration for crypto market volatility patterns
 """
 import numpy as np
@@ -11,7 +11,8 @@ from crypto_agent.database import AgentDatabase
 from crypto_agent.config import (
     MODEL_WEIGHTS, QUALITY_WEIGHTS, SIGNAL_THRESHOLDS,
     REGIME_CONFIG, TIMEFRAME_WEIGHTS, PREDICTION_LIMITS,
-    POSITION_SIZING
+    POSITION_SIZING, FIBONACCI_LEVELS, TP_DISTRIBUTION,
+    LEVERAGE_CONFIG, RISK_MANAGEMENT
 )
 
 logger = logging.getLogger(__name__)
@@ -335,14 +336,14 @@ class SmartConsensusAnalyzer:
 
 class TradeQualityScorer:
     """
-    Tool 2: Trade Quality Scorer
-    Uses the FIXED consensus analyzer output
+    Tool 2: Trade Quality Scorer - FIBONACCI & LEVERAGE ENHANCED
+    Uses the FIXED consensus analyzer output + Fibonacci targets
     """
     
     def __init__(self, db: AgentDatabase):
         """Initialize quality scorer"""
         self.db = db
-        logger.info("⭐ Trade Quality Scorer initialized")
+        logger.info("⭐ Trade Quality Scorer initialized (FIBONACCI ENHANCED)")
     
     def score(self, symbol: str, timeframe: str, consensus: Dict) -> Dict:
         """Score the quality of a trading signal"""
@@ -418,6 +419,196 @@ class TradeQualityScorer:
         logger.info(f"✅ Quality Score: {result['quality_score']}/100 (Grade: {grade})")
         
         return result
+    
+    # ============================================================================
+    # FIBONACCI TARGET CALCULATION - FIXED VERSION
+    # ============================================================================
+    
+    def calculate_fibonacci_targets(self, entry_price: float, direction: str,
+                                    timeframe: str, quality_score: int,
+                                    consensus_confidence: float) -> Dict:
+        """
+        Calculate Fibonacci-based take profit levels, stop loss, and leverage.
+        FIXED: Now uses realistic crypto profit targets (0.5-2.0%)
+        
+        Args:
+            entry_price: Current entry price
+            direction: 'UP' for long, 'DOWN' for short
+            timeframe: Trading timeframe
+            quality_score: Trade quality score (0-100)
+            consensus_confidence: Model consensus confidence (0-1)
+        
+        Returns:
+            Dict with fibonacci targets, stop loss, and leverage recommendation
+        """
+        
+        # Get base stop loss for timeframe
+        base_stop_loss_pct = RISK_MANAGEMENT['default_stop_loss_pct'].get(
+            timeframe, 0.03
+        )
+        
+        # Adjust stop loss based on quality and confidence
+        # Higher quality/confidence = tighter stops (1.5-2.5%)
+        # Lower quality/confidence = wider stops (2.5-3.5%)
+        if quality_score >= 80 and consensus_confidence >= 0.70:
+            stop_loss_pct = base_stop_loss_pct * 0.5  # Tight: ~1.75% for 4h
+        elif quality_score >= 70 and consensus_confidence >= 0.60:
+            stop_loss_pct = base_stop_loss_pct * 0.65  # Medium: ~2.3% for 4h
+        elif quality_score >= 60 and consensus_confidence >= 0.50:
+            stop_loss_pct = base_stop_loss_pct * 0.8   # Normal: ~2.8% for 4h
+        else:
+            stop_loss_pct = base_stop_loss_pct * 1.0   # Wide: ~3.5% for 4h
+        
+        # Ensure stop loss is between 1.5% and 3.5% (reasonable range)
+        stop_loss_pct = max(0.015, min(0.035, stop_loss_pct))
+        
+        # Calculate stop loss price
+        if direction in ['UP', 'BUY', 'STRONG_BUY']:
+            stop_loss_price = entry_price * (1 - stop_loss_pct)
+            multiplier = 1
+        else:  # DOWN, SELL, STRONG_SELL
+            stop_loss_price = entry_price * (1 + stop_loss_pct)
+            multiplier = -1
+        
+        # ============================================================================
+        # FIBONACCI-BASED TAKE PROFIT LEVELS - REALISTIC TARGETS
+        # Target realistic crypto profits: TP1: 0.5-0.7%, TP2: 1.1-1.4%, TP3: 1.6-2.0%
+        # ============================================================================
+        
+        # Realistic targets for crypto (percentage moves)
+        tp1_target_pct = 0.006   # 0.6% target for TP1
+        tp2_target_pct = 0.012   # 1.2% target for TP2
+        tp3_target_pct = 0.018   # 1.8% target for TP3
+        
+        # Adjust based on timeframe (longer timeframes can have bigger targets)
+        timeframe_multipliers = {
+            '5m': 0.4,   # 5m: smaller targets (0.24%, 0.48%, 0.72%)
+            '15m': 0.6,  # 15m: (0.36%, 0.72%, 1.08%)
+            '1h': 0.8,   # 1h: (0.48%, 0.96%, 1.44%)
+            '4h': 1.0,   # 4h: standard targets (0.6%, 1.2%, 1.8%)
+            '1d': 1.3    # 1d: larger targets (0.78%, 1.56%, 2.34%)
+        }
+        
+        tf_mult = timeframe_multipliers.get(timeframe, 1.0)
+        
+        tp1_target_pct *= tf_mult
+        tp2_target_pct *= tf_mult
+        tp3_target_pct *= tf_mult
+        
+        # Calculate TP prices
+        tp1_price = entry_price * (1 + tp1_target_pct * multiplier)
+        tp2_price = entry_price * (1 + tp2_target_pct * multiplier)
+        tp3_price = entry_price * (1 + tp3_target_pct * multiplier)
+        
+        # Convert to percentages for display
+        tp1_pct = abs((tp1_price - entry_price) / entry_price) * 100
+        tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
+        tp3_pct = abs((tp3_price - entry_price) / entry_price) * 100
+        
+        # Calculate Risk:Reward ratio (average of all TPs)
+        risk_amount = abs(entry_price - stop_loss_price)
+        avg_reward = (abs(tp1_price - entry_price) + abs(tp2_price - entry_price) + abs(tp3_price - entry_price)) / 3
+        risk_reward_ratio = avg_reward / risk_amount if risk_amount > 0 else 0
+        
+        # Calculate leverage recommendation
+        leverage = self._calculate_leverage_recommendation(
+            quality_score, consensus_confidence, risk_reward_ratio
+        )
+        
+        return {
+            'stop_loss': stop_loss_price,
+            'stop_loss_pct': stop_loss_pct * 100,
+            
+            'take_profit_1': tp1_price,
+            'tp1_pct': tp1_pct,
+            'tp1_fib_level': '0.382',
+            'tp1_allocation': TP_DISTRIBUTION['tp1'],
+            
+            'take_profit_2': tp2_price,
+            'tp2_pct': tp2_pct,
+            'tp2_fib_level': '0.618',
+            'tp2_allocation': TP_DISTRIBUTION['tp2'],
+            
+            'take_profit_3': tp3_price,
+            'tp3_pct': tp3_pct,
+            'tp3_fib_level': '1.0',
+            'tp3_allocation': TP_DISTRIBUTION['tp3'],
+            
+            'risk_reward_ratio': risk_reward_ratio,
+            'suggested_leverage': leverage['recommended'],
+            'leverage_range': leverage['range'],
+            'leverage_note': leverage['note']
+        }
+    
+    def _calculate_leverage_recommendation(self, quality_score: int,
+                                          confidence: float,
+                                          risk_reward_ratio: float) -> Dict:
+        """
+        Calculate appropriate leverage based on trade quality and confidence.
+        
+        Returns leverage between 1x and 20x with conservative bias.
+        """
+        
+        # Determine confidence tier
+        if confidence >= 0.75:
+            tier = 'very_high'
+        elif confidence >= 0.60:
+            tier = 'high'
+        elif confidence >= 0.50:
+            tier = 'moderate'
+        else:
+            tier = 'low'
+        
+        base_range = LEVERAGE_CONFIG['confidence_tiers'][tier]
+        
+        # Determine quality multiplier
+        if quality_score >= 80:
+            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['excellent']
+        elif quality_score >= 70:
+            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['good']
+        elif quality_score >= 60:
+            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['fair']
+        else:
+            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['poor']
+        
+        # Calculate leverage range
+        min_lev = int(base_range[0] * quality_mult)
+        max_lev = int(base_range[1] * quality_mult)
+        
+        # Apply risk-reward adjustment
+        # Better R:R allows slightly higher leverage
+        if risk_reward_ratio >= 3.0:
+            max_lev = min(max_lev + 2, LEVERAGE_CONFIG['max_recommended'])
+        elif risk_reward_ratio < 1.5:
+            max_lev = max(max_lev - 2, min_lev)
+        
+        # Ensure within absolute limits
+        min_lev = max(LEVERAGE_CONFIG['min_leverage'], min_lev)
+        max_lev = min(LEVERAGE_CONFIG['max_leverage'], max_lev)
+        max_lev = min(LEVERAGE_CONFIG['max_recommended'], max_lev)
+        
+        # Recommended leverage (middle of range)
+        recommended = int((min_lev + max_lev) / 2)
+        
+        # Generate note
+        if recommended <= 3:
+            note = "Conservative - Low leverage for safety"
+        elif recommended <= 5:
+            note = "Moderate - Balanced risk/reward"
+        elif recommended <= 10:
+            note = "Aggressive - Higher risk, manage carefully"
+        else:
+            note = "Very Aggressive - Expert traders only"
+        
+        return {
+            'recommended': recommended,
+            'range': (min_lev, max_lev),
+            'note': note
+        }
+    
+    # ============================================================================
+    # END OF FIBONACCI METHODS
+    # ============================================================================
     
     def _score_model_consensus(self, consensus: Dict) -> float:
         """Score based on how many models agree (0-10)"""

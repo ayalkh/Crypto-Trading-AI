@@ -1,18 +1,17 @@
 """
-Trading Agent Tools - FIBONACCI & LEVERAGE ENHANCED
-Fixed threshold calibration for crypto market volatility patterns
+Trading Agent Tools
+4 core tools that power the intelligent trading decision agent
 """
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import logging
-from crypto_agent.database import AgentDatabase
-from crypto_agent.config import (
+from .database import AgentDatabase
+from .config import (
     MODEL_WEIGHTS, QUALITY_WEIGHTS, SIGNAL_THRESHOLDS,
     REGIME_CONFIG, TIMEFRAME_WEIGHTS, PREDICTION_LIMITS,
-    POSITION_SIZING, FIBONACCI_LEVELS, TP_DISTRIBUTION,
-    LEVERAGE_CONFIG, RISK_MANAGEMENT
+    POSITION_SIZING
 )
 
 logger = logging.getLogger(__name__)
@@ -20,23 +19,32 @@ logger = logging.getLogger(__name__)
 
 class SmartConsensusAnalyzer:
     """
-    Tool 1: Smart Consensus Analyzer - FIXED
+    Tool 1: Smart Consensus Analyzer
     
-    Fixed threshold calibration:
-    - STRONG signals: 0.06% (was 0.15% - too high for crypto)
-    - Regular signals: 0.02% (was 0.03%)
-    - Uses predicted_direction from database directly
+    Intelligently interprets contradictory model predictions by:
+    - Weighting models by recent performance
+    - Understanding model-specific behaviors
+    - Considering confidence distribution
+    - Checking multi-timeframe alignment
     """
     
     def __init__(self, db: AgentDatabase):
         """Initialize consensus analyzer"""
         self.db = db
-        self.logger = logging.getLogger(__name__)
-        logger.info("🧠 Smart Consensus Analyzer initialized (FIXED THRESHOLDS)")
+        self.logger = logging.getLogger(__name__) 
+
+        logger.info("🧠 Smart Consensus Analyzer initialized")
     
     def analyze(self, symbol: str, timeframe: str) -> Dict:
         """
         Analyze model predictions and generate weighted consensus
+        
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USDT')
+            timeframe: Timeframe (e.g., '1h', '4h')
+            
+        Returns:
+            Dict with consensus recommendation, confidence, and reasoning
         """
         logger.info(f"🔍 Analyzing consensus for {symbol} {timeframe}")
         
@@ -48,12 +56,6 @@ class SmartConsensusAnalyzer:
         self.logger.info(f"🐛 DEBUG: Predictions columns: {predictions.columns.tolist()}")
         if not predictions.empty:
             self.logger.info(f"🐛 DEBUG: First prediction: {predictions.iloc[0].to_dict()}")
-            # NEW: Log ALL predicted directions
-            directions = predictions['predicted_direction'].value_counts()
-            self.logger.info(f"🐛 DEBUG: Direction breakdown: {directions.to_dict()}")
-            # NEW: Log model types as stored
-            model_types = predictions['model_type'].unique().tolist()
-            self.logger.info(f"🐛 DEBUG: Model types in DB: {model_types}")
         
         if predictions.empty:
             logger.warning(f"⚠️ No predictions available for {symbol} {timeframe}")
@@ -68,8 +70,8 @@ class SmartConsensusAnalyzer:
         # Get model performance to weight predictions
         performance = self.db.get_model_performance(symbol, timeframe, days_back=30)
         
-        # Calculate weighted consensus - FIXED VERSION
-        consensus = self._calculate_weighted_consensus_FIXED(
+        # Calculate weighted consensus
+        consensus = self._calculate_weighted_consensus(
             predictions, performance, timeframe
         )
         
@@ -89,16 +91,12 @@ class SmartConsensusAnalyzer:
         
         return consensus
     
-    def _calculate_weighted_consensus_FIXED(self, predictions: pd.DataFrame,
-                                           performance: pd.DataFrame,
-                                           timeframe: str) -> Dict:
+    def _calculate_weighted_consensus(self, predictions: pd.DataFrame,
+                                   performance: pd.DataFrame,
+                                   timeframe: str) -> Dict:
         """
-        FIXED VERSION: Calculate weighted consensus with crypto-appropriate thresholds
-        
-        KEY CHANGES:
-        1. Use predicted_direction from database (already calculated correctly)
-        2. Lower thresholds: STRONG=0.06%, REGULAR=0.02% (was 0.15%/0.03%)
-        3. Better confidence calculation that doesn't require perfect agreement
+        Calculate weighted consensus from model predictions
+        Adjusts weights based on recent model performance
         """
         
         if predictions.empty:
@@ -107,25 +105,26 @@ class SmartConsensusAnalyzer:
                 'confidence': 0.0,
                 'weighted_price_change': 0.0,
                 'models_used': [],
-                'consensus_strength': 0.0,
                 'reasoning': 'No ML predictions available'
             }
         
         # Get base weights for this timeframe
         base_weights = MODEL_WEIGHTS.get(timeframe, MODEL_WEIGHTS['1h'])
         
-        # Build weighted model data
+        # Convert predictions to list of dicts
         models_used = []
         total_weight = 0
         weighted_price_sum = 0
-        
-        # Count directions using DATABASE values (not recalculating)
-        direction_weights = {'UP': 0, 'DOWN': 0, 'NEUTRAL': 0}
+        directions = []
         
         for _, pred in predictions.iterrows():
-            model_type_raw = pred['model_type']
-            model_type = model_type_raw.upper()
+            model_type = pred['model_type']
+            
+            # Get base weight
             weight = base_weights.get(model_type, 0)
+            
+            if weight == 0:
+                continue
             
             # Adjust weight based on recent performance (if available)
             if not performance.empty and 'model_type' in performance.columns:
@@ -134,34 +133,31 @@ class SmartConsensusAnalyzer:
                     if not perf_row.empty:
                         accuracy = perf_row.iloc[0]['accuracy']
                         # Boost or reduce weight based on accuracy
+                        # If accuracy > 52.5%, increase weight; if < 52.5%, decrease
                         performance_multiplier = 1.0 + ((accuracy - 0.525) * 2)
                         performance_multiplier = max(0.5, min(1.5, performance_multiplier))
                         weight *= performance_multiplier
                 except Exception as e:
                     self.logger.debug(f"Could not adjust weight for {model_type}: {e}")
-            
-            # Get predicted values
-            price_change = pred.get('predicted_change_pct', 0)
-            direction = pred.get('predicted_direction', 'NEUTRAL')
+                    # Continue with base weight
             
             # Clip predicted price change to reasonable limits
+            price_change = pred.get('predicted_change_pct', 0)
             max_change = PREDICTION_LIMITS.get(timeframe, 0.05)
             price_change = max(-max_change, min(max_change, price_change))
             
-            # Accumulate weighted sums
+            # Accumulate
             total_weight += weight
             weighted_price_sum += price_change * weight
-            direction_weights[direction] += weight
+            directions.append(pred.get('predicted_direction', 'NEUTRAL'))
             
             models_used.append({
                 'model': model_type,
-                'direction': direction,
+                'direction': pred.get('predicted_direction', 'NEUTRAL'),
                 'price_change': price_change,
                 'confidence': pred.get('confidence_score', 0),
                 'weight': weight
             })
-            
-            self.logger.info(f"🐛 Model {model_type}: dir={direction}, change={price_change:.4%}, weight={weight:.2f}")
         
         if total_weight == 0 or not models_used:
             return {
@@ -169,71 +165,50 @@ class SmartConsensusAnalyzer:
                 'confidence': 0.0,
                 'weighted_price_change': 0.0,
                 'models_used': [],
-                'consensus_strength': 0.0,
                 'reasoning': 'No valid model predictions'
             }
         
         # Calculate weighted average price change
         weighted_price_change = weighted_price_sum / total_weight
         
-        # Calculate dominant direction by WEIGHT (not count)
-        dominant_direction = max(direction_weights.items(), key=lambda x: x[1])[0]
-        dominant_weight_pct = direction_weights[dominant_direction] / total_weight
-        
-        self.logger.info(f"🐛 Weighted avg change: {weighted_price_change:.4%}")
-        self.logger.info(f"🐛 Direction weights: {direction_weights}")
-        self.logger.info(f"🐛 Dominant: {dominant_direction} ({dominant_weight_pct:.1%})")
-        
-        # FIXED THRESHOLDS - Calibrated for crypto volatility
-        # Strong signals: 0.06% (realistic for 4h crypto moves)
-        # Regular signals: 0.02% (realistic for 1h crypto moves)
-        if weighted_price_change > 0.0006:  # > 0.06%
+        # Determine recommendation based on weighted change
+        if weighted_price_change > 0.01:  # > 1%
             recommendation = 'STRONG_BUY'
-        elif weighted_price_change > 0.0002:  # > 0.02%
+        elif weighted_price_change > 0.005:  # > 0.5%
             recommendation = 'BUY'
-        elif weighted_price_change < -0.0006:  # < -0.06%
+        elif weighted_price_change < -0.01:  # < -1%
             recommendation = 'STRONG_SELL'
-        elif weighted_price_change < -0.0002:  # < -0.02%
+        elif weighted_price_change < -0.005:  # < -0.5%
             recommendation = 'SELL'
         else:
             recommendation = 'HOLD'
         
-        # Calculate confidence - IMPROVED
-        # Confidence comes from:
-        # 1. Weighted directional agreement (60%)
-        # 2. Magnitude of price change (20%)
-        # 3. Model confidence scores (20%)
+        # Calculate confidence based on model agreement
+        direction_counts = {
+            'UP': directions.count('UP'),
+            'DOWN': directions.count('DOWN'),
+            'NEUTRAL': directions.count('NEUTRAL')
+        }
         
-        # 1. Directional agreement by weight
-        directional_confidence = dominant_weight_pct
+        total_models = len(directions)
+        max_agreement = max(direction_counts.values()) if direction_counts else 0
+        agreement_rate = max_agreement / total_models if total_models > 0 else 0
         
-        # 2. Magnitude confidence (scale to realistic crypto ranges)
-        # 0.1% change should give ~0.5 confidence, 0.5% should give ~1.0
-        magnitude_confidence = min(abs(weighted_price_change) * 500, 1.0)
+        # Confidence is combination of agreement and magnitude
+        magnitude_confidence = min(abs(weighted_price_change) * 10, 1.0)  # Max 1.0
+        confidence = (agreement_rate * 0.6 + magnitude_confidence * 0.4)
         
-        # 3. Average model confidence
-        avg_model_confidence = np.mean([m['confidence'] for m in models_used])
-        
-        # Combined confidence
-        confidence = (
-            directional_confidence * 0.6 +
-            magnitude_confidence * 0.2 +
-            avg_model_confidence * 0.2
+        # Check multi-timeframe alignment (if we have predictions)
+        alignment_score = self._check_timeframe_alignment(
+            predictions.iloc[0]['symbol'], timeframe
         )
         
-        self.logger.info(f"🐛 Confidence breakdown:")
-        self.logger.info(f"   Directional: {directional_confidence:.2%}")
-        self.logger.info(f"   Magnitude: {magnitude_confidence:.2%}")
-        self.logger.info(f"   Model avg: {avg_model_confidence:.2%}")
-        self.logger.info(f"   TOTAL: {confidence:.2%}")
-        
-        # Calculate consensus strength (for quality scoring)
-        consensus_strength = dominant_weight_pct
+        # Adjust confidence based on alignment
+        confidence *= (0.8 + alignment_score * 0.2)
         
         # Generate reasoning
-        reasoning = self._generate_reasoning_FIXED(
-            models_used, dominant_direction, direction_weights, 
-            weighted_price_change, confidence, total_weight
+        reasoning = self._generate_consensus_reasoning(
+            models_used, recommendation, confidence, alignment_score
         )
         
         return {
@@ -241,53 +216,10 @@ class SmartConsensusAnalyzer:
             'confidence': confidence,
             'weighted_price_change': weighted_price_change,
             'models_used': models_used,
-            'consensus_strength': consensus_strength,
+            'alignment_score': alignment_score,
             'reasoning': reasoning
         }
-    
-    def _generate_reasoning_FIXED(self, models_used: List[Dict],
-                                 dominant_direction: str,
-                                 direction_weights: Dict,
-                                 price_change: float,
-                                 confidence: float,
-                                 total_weight: float) -> str:
-        """Generate human-readable reasoning"""
         
-        if not models_used:
-            return "No model predictions available."
-        
-        # Calculate weighted agreement
-        dominant_weight = direction_weights[dominant_direction]
-        agreement_pct = (dominant_weight / total_weight) * 100
-        
-        parts = []
-        
-        # Direction agreement
-        if agreement_pct >= 80:
-            parts.append(f"Strong {dominant_direction} consensus ({agreement_pct:.0f}% weighted agreement)")
-        elif agreement_pct >= 60:
-            parts.append(f"Moderate {dominant_direction} consensus ({agreement_pct:.0f}% weighted agreement)")
-        else:
-            parts.append(f"Weak {dominant_direction} signal ({agreement_pct:.0f}% weighted agreement)")
-        
-        # Model count
-        model_count = len(models_used)
-        parts.append(f"from {model_count} models")
-        
-        # Price expectation
-        if abs(price_change) > 0.001:  # > 0.1%
-            parts.append(f"expecting {price_change:+.2%} move")
-        
-        # Confidence level
-        if confidence > 0.70:
-            parts.append("with high confidence")
-        elif confidence > 0.50:
-            parts.append("with moderate confidence")
-        else:
-            parts.append("with low confidence")
-        
-        return ". ".join(parts) + "."
-    
     def _check_multitimeframe_alignment(self, symbol: str,
                                        primary_timeframe: str) -> Dict:
         """Check if other timeframes agree with primary timeframe signal"""
@@ -301,7 +233,7 @@ class SmartConsensusAnalyzer:
         if primary_pred.empty:
             return {'alignment_score': 0.5, 'aligned_timeframes': []}
         
-        # Get dominant direction from primary (by count)
+        # Get dominant direction from primary
         primary_directions = primary_pred['predicted_direction'].value_counts()
         if primary_directions.empty:
             return {'alignment_score': 0.5, 'aligned_timeframes': []}
@@ -332,21 +264,85 @@ class SmartConsensusAnalyzer:
             'aligned_timeframes': aligned_timeframes,
             'total_checked': total_count
         }
+    
+    def _generate_reasoning(self, models_used: List[Dict],
+                           dominant_direction: str,
+                           direction_votes: Dict,
+                           price_change: float,
+                           timeframe: str) -> str:
+        """Generate human-readable reasoning for the consensus"""
+        
+        if not models_used:
+            return "No model predictions available."
+        
+        # Count agreements
+        agree_count = sum(1 for m in models_used if m['direction'] == dominant_direction)
+        total_count = len(models_used)
+        
+        # Build reasoning
+        parts = []
+        
+        # Model agreement
+        if agree_count == total_count:
+            parts.append(f"All {total_count} models agree on {dominant_direction} direction")
+        elif agree_count / total_count >= 0.66:
+            parts.append(f"Strong consensus: {agree_count}/{total_count} models predict {dominant_direction}")
+        else:
+            parts.append(f"Weak consensus: {agree_count}/{total_count} models predict {dominant_direction}")
+        
+        # Highlight model contributions
+        top_models = sorted(models_used, key=lambda x: x['weight'], reverse=True)[:2]
+        model_names = [m['model'].upper() for m in top_models]
+        parts.append(f"Led by {', '.join(model_names)}")
+        
+        # Price change expectation
+        if abs(price_change) > 0.01:  # > 1%
+            parts.append(f"expecting {price_change:+.2%} move")
+        
+        # Recent performance note
+        avg_confidence = np.mean([m['confidence'] for m in models_used])
+        if avg_confidence > 0.65:
+            parts.append("with high model confidence")
+        elif avg_confidence < 0.45:
+            parts.append("but model confidence is low")
+        
+        return ". ".join(parts) + "."
 
 
 class TradeQualityScorer:
     """
-    Tool 2: Trade Quality Scorer - FIBONACCI & LEVERAGE ENHANCED
-    Uses the FIXED consensus analyzer output + Fibonacci targets
+    Tool 2: Trade Quality Scorer
+    
+    Ranks every signal from 0-100 based on:
+    1. Model consensus strength
+    2. Historical win rate at this confidence level
+    3. Multi-timeframe alignment
+    4. Recent model performance
+    5. Technical indicator confirmation
+    6. Signal strength vs noise
+    7. Data freshness
+    8. Trading frequency (avoid overtrading)
+    9. BTC correlation (independent movement)
     """
     
     def __init__(self, db: AgentDatabase):
         """Initialize quality scorer"""
         self.db = db
-        logger.info("⭐ Trade Quality Scorer initialized (FIBONACCI ENHANCED)")
+        logger.info("⭐ Trade Quality Scorer initialized")
     
-    def score(self, symbol: str, timeframe: str, consensus: Dict) -> Dict:
-        """Score the quality of a trading signal"""
+    def score(self, symbol: str, timeframe: str,
+             consensus: Dict) -> Dict:
+        """
+        Score the quality of a trading signal
+        
+        Args:
+            symbol: Trading pair
+            timeframe: Timeframe
+            consensus: Output from SmartConsensusAnalyzer
+            
+        Returns:
+            Dict with quality score (0-100), grade, breakdown, and position sizing
+        """
         logger.info(f"📊 Scoring trade quality for {symbol} {timeframe}")
         
         # Calculate individual dimension scores
@@ -420,196 +416,6 @@ class TradeQualityScorer:
         
         return result
     
-    # ============================================================================
-    # FIBONACCI TARGET CALCULATION - FIXED VERSION
-    # ============================================================================
-    
-    def calculate_fibonacci_targets(self, entry_price: float, direction: str,
-                                    timeframe: str, quality_score: int,
-                                    consensus_confidence: float) -> Dict:
-        """
-        Calculate Fibonacci-based take profit levels, stop loss, and leverage.
-        FIXED: Now uses realistic crypto profit targets (0.5-2.0%)
-        
-        Args:
-            entry_price: Current entry price
-            direction: 'UP' for long, 'DOWN' for short
-            timeframe: Trading timeframe
-            quality_score: Trade quality score (0-100)
-            consensus_confidence: Model consensus confidence (0-1)
-        
-        Returns:
-            Dict with fibonacci targets, stop loss, and leverage recommendation
-        """
-        
-        # Get base stop loss for timeframe
-        base_stop_loss_pct = RISK_MANAGEMENT['default_stop_loss_pct'].get(
-            timeframe, 0.03
-        )
-        
-        # Adjust stop loss based on quality and confidence
-        # Higher quality/confidence = tighter stops (1.5-2.5%)
-        # Lower quality/confidence = wider stops (2.5-3.5%)
-        if quality_score >= 80 and consensus_confidence >= 0.70:
-            stop_loss_pct = base_stop_loss_pct * 0.5  # Tight: ~1.75% for 4h
-        elif quality_score >= 70 and consensus_confidence >= 0.60:
-            stop_loss_pct = base_stop_loss_pct * 0.65  # Medium: ~2.3% for 4h
-        elif quality_score >= 60 and consensus_confidence >= 0.50:
-            stop_loss_pct = base_stop_loss_pct * 0.8   # Normal: ~2.8% for 4h
-        else:
-            stop_loss_pct = base_stop_loss_pct * 1.0   # Wide: ~3.5% for 4h
-        
-        # Ensure stop loss is between 1.5% and 3.5% (reasonable range)
-        stop_loss_pct = max(0.015, min(0.035, stop_loss_pct))
-        
-        # Calculate stop loss price
-        if direction in ['UP', 'BUY', 'STRONG_BUY']:
-            stop_loss_price = entry_price * (1 - stop_loss_pct)
-            multiplier = 1
-        else:  # DOWN, SELL, STRONG_SELL
-            stop_loss_price = entry_price * (1 + stop_loss_pct)
-            multiplier = -1
-        
-        # ============================================================================
-        # FIBONACCI-BASED TAKE PROFIT LEVELS - REALISTIC TARGETS
-        # Target realistic crypto profits: TP1: 0.5-0.7%, TP2: 1.1-1.4%, TP3: 1.6-2.0%
-        # ============================================================================
-        
-        # Realistic targets for crypto (percentage moves)
-        tp1_target_pct = 0.006   # 0.6% target for TP1
-        tp2_target_pct = 0.012   # 1.2% target for TP2
-        tp3_target_pct = 0.018   # 1.8% target for TP3
-        
-        # Adjust based on timeframe (longer timeframes can have bigger targets)
-        timeframe_multipliers = {
-            '5m': 0.4,   # 5m: smaller targets (0.24%, 0.48%, 0.72%)
-            '15m': 0.6,  # 15m: (0.36%, 0.72%, 1.08%)
-            '1h': 0.8,   # 1h: (0.48%, 0.96%, 1.44%)
-            '4h': 1.0,   # 4h: standard targets (0.6%, 1.2%, 1.8%)
-            '1d': 1.3    # 1d: larger targets (0.78%, 1.56%, 2.34%)
-        }
-        
-        tf_mult = timeframe_multipliers.get(timeframe, 1.0)
-        
-        tp1_target_pct *= tf_mult
-        tp2_target_pct *= tf_mult
-        tp3_target_pct *= tf_mult
-        
-        # Calculate TP prices
-        tp1_price = entry_price * (1 + tp1_target_pct * multiplier)
-        tp2_price = entry_price * (1 + tp2_target_pct * multiplier)
-        tp3_price = entry_price * (1 + tp3_target_pct * multiplier)
-        
-        # Convert to percentages for display
-        tp1_pct = abs((tp1_price - entry_price) / entry_price) * 100
-        tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
-        tp3_pct = abs((tp3_price - entry_price) / entry_price) * 100
-        
-        # Calculate Risk:Reward ratio (average of all TPs)
-        risk_amount = abs(entry_price - stop_loss_price)
-        avg_reward = (abs(tp1_price - entry_price) + abs(tp2_price - entry_price) + abs(tp3_price - entry_price)) / 3
-        risk_reward_ratio = avg_reward / risk_amount if risk_amount > 0 else 0
-        
-        # Calculate leverage recommendation
-        leverage = self._calculate_leverage_recommendation(
-            quality_score, consensus_confidence, risk_reward_ratio
-        )
-        
-        return {
-            'stop_loss': stop_loss_price,
-            'stop_loss_pct': stop_loss_pct * 100,
-            
-            'take_profit_1': tp1_price,
-            'tp1_pct': tp1_pct,
-            'tp1_fib_level': '0.382',
-            'tp1_allocation': TP_DISTRIBUTION['tp1'],
-            
-            'take_profit_2': tp2_price,
-            'tp2_pct': tp2_pct,
-            'tp2_fib_level': '0.618',
-            'tp2_allocation': TP_DISTRIBUTION['tp2'],
-            
-            'take_profit_3': tp3_price,
-            'tp3_pct': tp3_pct,
-            'tp3_fib_level': '1.0',
-            'tp3_allocation': TP_DISTRIBUTION['tp3'],
-            
-            'risk_reward_ratio': risk_reward_ratio,
-            'suggested_leverage': leverage['recommended'],
-            'leverage_range': leverage['range'],
-            'leverage_note': leverage['note']
-        }
-    
-    def _calculate_leverage_recommendation(self, quality_score: int,
-                                          confidence: float,
-                                          risk_reward_ratio: float) -> Dict:
-        """
-        Calculate appropriate leverage based on trade quality and confidence.
-        
-        Returns leverage between 1x and 20x with conservative bias.
-        """
-        
-        # Determine confidence tier
-        if confidence >= 0.75:
-            tier = 'very_high'
-        elif confidence >= 0.60:
-            tier = 'high'
-        elif confidence >= 0.50:
-            tier = 'moderate'
-        else:
-            tier = 'low'
-        
-        base_range = LEVERAGE_CONFIG['confidence_tiers'][tier]
-        
-        # Determine quality multiplier
-        if quality_score >= 80:
-            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['excellent']
-        elif quality_score >= 70:
-            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['good']
-        elif quality_score >= 60:
-            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['fair']
-        else:
-            quality_mult = LEVERAGE_CONFIG['quality_multipliers']['poor']
-        
-        # Calculate leverage range
-        min_lev = int(base_range[0] * quality_mult)
-        max_lev = int(base_range[1] * quality_mult)
-        
-        # Apply risk-reward adjustment
-        # Better R:R allows slightly higher leverage
-        if risk_reward_ratio >= 3.0:
-            max_lev = min(max_lev + 2, LEVERAGE_CONFIG['max_recommended'])
-        elif risk_reward_ratio < 1.5:
-            max_lev = max(max_lev - 2, min_lev)
-        
-        # Ensure within absolute limits
-        min_lev = max(LEVERAGE_CONFIG['min_leverage'], min_lev)
-        max_lev = min(LEVERAGE_CONFIG['max_leverage'], max_lev)
-        max_lev = min(LEVERAGE_CONFIG['max_recommended'], max_lev)
-        
-        # Recommended leverage (middle of range)
-        recommended = int((min_lev + max_lev) / 2)
-        
-        # Generate note
-        if recommended <= 3:
-            note = "Conservative - Low leverage for safety"
-        elif recommended <= 5:
-            note = "Moderate - Balanced risk/reward"
-        elif recommended <= 10:
-            note = "Aggressive - Higher risk, manage carefully"
-        else:
-            note = "Very Aggressive - Expert traders only"
-        
-        return {
-            'recommended': recommended,
-            'range': (min_lev, max_lev),
-            'note': note
-        }
-    
-    # ============================================================================
-    # END OF FIBONACCI METHODS
-    # ============================================================================
-    
     def _score_model_consensus(self, consensus: Dict) -> float:
         """Score based on how many models agree (0-10)"""
         consensus_strength = consensus.get('consensus_strength', 0.5)
@@ -647,6 +453,7 @@ class TradeQualityScorer:
         win_rate = wins / total
         
         # Win rate > 60% = high score
+        # Win rate < 40% = low score
         if win_rate >= 0.70:
             score = 10
         elif win_rate >= 0.60:
@@ -662,8 +469,13 @@ class TradeQualityScorer:
     
     def _score_timeframe_alignment(self, consensus: Dict) -> float:
         """Score based on multi-timeframe alignment (0-10)"""
+        
         mtf = consensus.get('mtf_alignment', {})
         alignment_score = mtf.get('alignment_score', 0.5)
+        
+        # Perfect alignment = 10 points
+        # 50% alignment = 5 points
+        # No alignment = 0 points
         return alignment_score * 10
     
     def _score_model_performance(self, symbol: str, timeframe: str,
@@ -673,10 +485,12 @@ class TradeQualityScorer:
         performance = self.db.get_model_performance(symbol, timeframe, days_back=30)
         
         if performance.empty:
-            return 5.0
+            return 5.0  # Neutral if no performance data
         
+        # Get models used in consensus
         models_used = [m['model'] for m in consensus.get('models_used', [])]
         
+        # Calculate weighted average accuracy
         total_accuracy = 0
         total_weight = 0
         
@@ -692,6 +506,10 @@ class TradeQualityScorer:
         
         avg_accuracy = total_accuracy / total_weight
         
+        # Accuracy > 60% = excellent
+        # Accuracy > 55% = good
+        # Accuracy > 50% = fair
+        # Accuracy < 50% = poor
         if avg_accuracy >= 0.60:
             return 10.0
         elif avg_accuracy >= 0.55:
@@ -707,10 +525,11 @@ class TradeQualityScorer:
                                      consensus: Dict) -> float:
         """Score based on technical indicator support (0-10)"""
         
+        # Get technical indicators
         indicators = self.db.get_technical_indicators(symbol, timeframe, limit=5)
         
         if indicators.empty:
-            return 5.0
+            return 5.0  # Neutral if no indicators
         
         latest = indicators.iloc[0]
         direction = consensus.get('recommendation', 'HOLD')
@@ -740,6 +559,7 @@ class TradeQualityScorer:
         
         # Bollinger Bands check
         if pd.notna(latest.get('bb_upper')) and pd.notna(latest.get('bb_lower')):
+            # Get current price
             price = self.db.get_latest_price(symbol, timeframe)
             if price:
                 total_checks += 1
@@ -757,8 +577,14 @@ class TradeQualityScorer:
         return confirmation_rate * 10
     
     def _score_signal_strength(self, consensus: Dict) -> float:
-        """Score based on signal confidence (0-10)"""
+        """Score based on signal confidence vs historical noise (0-10)"""
+        
         confidence = consensus.get('confidence', 0.5)
+        
+        # High confidence = strong signal
+        # Confidence > 0.7 = 10 points
+        # Confidence 0.5 = 5 points
+        # Confidence < 0.3 = 0 points
         
         if confidence >= 0.70:
             return 10.0
@@ -774,6 +600,7 @@ class TradeQualityScorer:
     def _score_data_freshness(self, symbol: str, timeframe: str) -> float:
         """Score based on how recent the data is (0-10)"""
         
+        # Get latest price data
         df = self.db.get_price_history(symbol, timeframe, hours_back=24)
         
         if df.empty:
@@ -783,8 +610,13 @@ class TradeQualityScorer:
         now = datetime.now()
         age_minutes = (now - latest_timestamp).total_seconds() / 60
         
+        # Timeframe-specific freshness requirements
         max_age = {
-            '5m': 10, '15m': 30, '1h': 120, '4h': 480, '1d': 1440
+            '5m': 10,    # 10 minutes max
+            '15m': 30,   # 30 minutes max
+            '1h': 120,   # 2 hours max
+            '4h': 480,   # 8 hours max
+            '1d': 1440   # 24 hours max
         }.get(timeframe, 120)
         
         if age_minutes <= max_age * 0.5:
@@ -797,19 +629,22 @@ class TradeQualityScorer:
             return 1.0
     
     def _score_trading_frequency(self, symbol: str, timeframe: str) -> float:
-        """Score based on recent trading frequency (0-10)"""
+        """Score based on recent trading frequency - penalize overtrading (0-10)"""
         
+        # Get recent recommendations
         recent = self.db.get_historical_signals(symbol, timeframe, days_back=7)
         
         if recent.empty:
-            return 10.0
+            return 10.0  # No recent trades = good
         
+        # Count trades in last 24 hours
         cutoff = datetime.now() - timedelta(hours=24)
         recent['timestamp'] = pd.to_datetime(recent['timestamp'])
         recent_24h = recent[recent['timestamp'] >= cutoff]
         
         trade_count = len(recent_24h)
         
+        # Penalize frequent trading
         if trade_count == 0:
             return 10.0
         elif trade_count == 1:
@@ -819,23 +654,26 @@ class TradeQualityScorer:
         elif trade_count == 3:
             return 4.0
         else:
-            return 2.0
+            return 2.0  # Too many trades
     
     def _score_btc_correlation(self, symbol: str, timeframe: str) -> float:
         """Score based on independence from BTC (0-10)"""
         
         if symbol == 'BTC/USDT':
-            return 10.0
+            return 10.0  # BTC is always independent from itself
         
+        # Get price history for this symbol and BTC
         symbol_prices = self.db.get_price_history(symbol, timeframe, hours_back=168)
         btc_prices = self.db.get_price_history('BTC/USDT', timeframe, hours_back=168)
         
         if symbol_prices.empty or btc_prices.empty:
-            return 5.0
+            return 5.0  # Neutral if no data
         
+        # Calculate returns
         symbol_prices = symbol_prices.set_index('timestamp')
         btc_prices = btc_prices.set_index('timestamp')
         
+        # Align timestamps
         aligned = symbol_prices.join(btc_prices, how='inner', rsuffix='_btc')
         
         if len(aligned) < 20:
@@ -844,7 +682,12 @@ class TradeQualityScorer:
         symbol_returns = aligned['close'].pct_change()
         btc_returns = aligned['close_btc'].pct_change()
         
+        # Calculate correlation
         correlation = symbol_returns.corr(btc_returns)
+        
+        # High independence = high score
+        # correlation < 0.5 = very independent = 10 points
+        # correlation > 0.9 = very correlated = 2 points
         
         if pd.isna(correlation):
             return 5.0
@@ -899,55 +742,76 @@ class TradeQualityScorer:
     def _identify_strengths(self, breakdown: Dict) -> List[str]:
         """Identify top strengths from breakdown"""
         strengths = []
+        
         for dimension, data in breakdown.items():
             if data['score'] >= 8.0:
                 strengths.append(dimension.replace('_', ' ').title())
-        return strengths[:3]
+        
+        return strengths[:3]  # Top 3
     
     def _identify_weaknesses(self, breakdown: Dict) -> List[str]:
         """Identify weaknesses from breakdown"""
         weaknesses = []
+        
         for dimension, data in breakdown.items():
             if data['score'] <= 4.0:
                 weaknesses.append(dimension.replace('_', ' ').title())
-        return weaknesses[:3]
+        
+        return weaknesses[:3]  # Top 3
 
 
 class MarketContextAnalyzer:
     """
-    Tool 3: Market Context Analyzer - FIXED
-    Now includes fallback for limited data scenarios
+    Tool 3: Market Context Analyzer
+    
+    Detects current market regime and provides regime-specific recommendations:
+    - Trending Bull
+    - Trending Bear
+    - Ranging/Choppy
+    - High Volatility
     """
     
     def __init__(self, db: AgentDatabase):
+        """Initialize market context analyzer"""
         self.db = db
         logger.info("🌍 Market Context Analyzer initialized")
     
     def analyze(self, symbol: str = 'BTC/USDT') -> Dict:
-        """Analyze current market regime"""
+        """
+        Analyze current market regime
+        
+        Args:
+            symbol: Symbol to analyze (default BTC as market leader)
+            
+        Returns:
+            Dict with regime, characteristics, and recommendations
+        """
         logger.info(f"🔍 Analyzing market regime for {symbol}")
         
-        # Try daily data first
+        # Get price history
         df = self.db.get_price_history(
-            symbol, '1d',
+            symbol, 
+            '1d',  # Use daily for regime detection
             hours_back=REGIME_CONFIG['trend_lookback_days'] * 24
         )
         
-        # If not enough daily data, try 4h data
         if df.empty or len(df) < 7:
-            logger.info(f"ℹ️ Insufficient daily data ({len(df)} candles), trying 4h data...")
-            df = self.db.get_price_history(symbol, '4h', hours_back=7 * 24)
+            logger.warning("⚠️ Insufficient data for regime analysis")
+            return self._default_regime()
         
-        # If still not enough, use whatever we have with lower threshold
-        if df.empty or len(df) < 5:
-            logger.warning(f"⚠️ Insufficient data for regime analysis ({len(df)} candles)")
-            # Use simple fallback based on recent candles
-            return self._simple_regime_fallback(symbol)
-        
+        # Calculate trend
         trend = self._calculate_trend(df)
+        
+        # Calculate volatility
         volatility = self._calculate_volatility(df)
+        
+        # Determine regime
         regime = self._determine_regime(trend, volatility)
+        
+        # Get regime-specific recommendations
         recommendations = self._get_regime_recommendations(regime, trend, volatility)
+        
+        # Analyze market breadth (all symbols)
         breadth = self._analyze_market_breadth()
         
         result = {
@@ -969,96 +833,34 @@ class MarketContextAnalyzer:
         
         return result
     
-    def _simple_regime_fallback(self, symbol: str) -> Dict:
-        """Simple regime analysis using very recent data (5-20 candles)"""
-        
-        # Try to get at least 5 recent candles from any timeframe
-        df = None
-        for timeframe in ['4h', '1h', '1d']:
-            df = self.db.get_price_history(symbol, timeframe, hours_back=72)
-            if not df.empty and len(df) >= 5:
-                break
-        
-        if df is None or df.empty or len(df) < 5:
-            return self._default_regime()
-        
-        # Calculate simple trend from available data
-        df = df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp')
-        
-        first_price = df['close'].iloc[0]
-        last_price = df['close'].iloc[-1]
-        price_change = (last_price - first_price) / first_price
-        
-        # Calculate simple volatility
-        df['returns'] = df['close'].pct_change()
-        volatility = df['returns'].std()
-        
-        # Determine regime
-        if volatility > 0.04:  # High volatility
-            regime_type = 'High Volatility'
-            confidence = 0.7
-        elif price_change > 0.03:  # 3%+ up
-            regime_type = 'Trending Bull'
-            confidence = min(abs(price_change) * 10, 0.8)
-        elif price_change < -0.03:  # 3%+ down
-            regime_type = 'Trending Bear'
-            confidence = min(abs(price_change) * 10, 0.8)
-        else:
-            regime_type = 'Ranging'
-            confidence = 0.6
-        
-        # Get recommendations
-        recommendations = self._get_regime_recommendations(
-            {'type': regime_type, 'confidence': confidence},
-            {'direction': 'bullish' if price_change > 0 else 'bearish' if price_change < 0 else 'neutral',
-             'strength': min(abs(price_change) * 10, 1.0)},
-            {'level': 'high' if volatility > 0.04 else 'low' if volatility < 0.015 else 'moderate',
-             'value': volatility}
-        )
-        
-        risk_level = 'HIGH' if volatility > 0.04 else 'MODERATE' if regime_type in ['Trending Bull', 'Trending Bear'] else 'LOW'
-        
-        logger.info(f"✅ Fallback regime: {regime_type} (confidence: {confidence:.0%}, {len(df)} candles)")
-        
-        return {
-            'regime': regime_type,
-            'confidence': confidence,
-            'characteristics': {
-                'trend_direction': 'bullish' if price_change > 0 else 'bearish' if price_change < 0 else 'neutral',
-                'trend_strength': min(abs(price_change) * 10, 1.0),
-                'volatility_level': 'high' if volatility > 0.04 else 'low' if volatility < 0.015 else 'moderate',
-                'volatility_value': volatility,
-                'days_in_trend': len(df),
-                'market_breadth': {'status': 'limited_data'}
-            },
-            'recommendations': recommendations,
-            'risk_level': risk_level
-        }
-    
     def _calculate_trend(self, df: pd.DataFrame) -> Dict:
         """Calculate trend direction and strength"""
+        
         df = df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df = df.sort_values('timestamp')
         
+        # Calculate price change over period
         first_price = df['close'].iloc[0]
         last_price = df['close'].iloc[-1]
         total_change = (last_price - first_price) / first_price
         
+        # Calculate moving average slope
         df['ma_7'] = df['close'].rolling(7).mean()
         ma_change = (df['ma_7'].iloc[-1] - df['ma_7'].iloc[0]) / df['ma_7'].iloc[0]
         
-        if total_change > 0.05:
+        # Determine direction
+        if total_change > 0.05:  # > 5% up
             direction = 'bullish'
-        elif total_change < -0.05:
+        elif total_change < -0.05:  # > 5% down
             direction = 'bearish'
         else:
             direction = 'neutral'
         
-        strength = min(abs(total_change) / 0.15, 1.0)
+        # Calculate strength (0-1)
+        strength = min(abs(total_change) / 0.15, 1.0)  # Normalize to 15% move
         
+        # Calculate higher highs / lower lows
         highs = df['high'].rolling(3).max()
         lows = df['low'].rolling(3).min()
         
@@ -1077,10 +879,16 @@ class MarketContextAnalyzer:
     
     def _calculate_volatility(self, df: pd.DataFrame) -> Dict:
         """Calculate market volatility"""
+        
         df = df.copy()
+        
+        # Calculate daily returns
         df['returns'] = df['close'].pct_change()
+        
+        # Calculate volatility (standard deviation of returns)
         volatility_value = df['returns'].std()
         
+        # Classify volatility level
         if volatility_value > REGIME_CONFIG['high_volatility_threshold']:
             level = 'high'
         elif volatility_value < REGIME_CONFIG['low_volatility_threshold']:
@@ -1088,6 +896,7 @@ class MarketContextAnalyzer:
         else:
             level = 'moderate'
         
+        # Calculate average true range (ATR-like measure)
         df['high_low'] = df['high'] - df['low']
         avg_range = df['high_low'].mean() / df['close'].mean()
         
@@ -1099,51 +908,75 @@ class MarketContextAnalyzer:
     
     def _determine_regime(self, trend: Dict, volatility: Dict) -> Dict:
         """Determine market regime from trend and volatility"""
+        
         direction = trend['direction']
         strength = trend['strength']
         vol_level = volatility['level']
         
+        # High volatility overrides everything
         if vol_level == 'high':
-            return {'type': 'High Volatility', 'confidence': 0.9}
+            return {
+                'type': 'High Volatility',
+                'confidence': 0.9
+            }
         
+        # Trending markets
         if strength > 0.6:
             if direction == 'bullish':
-                return {'type': 'Trending Bull', 'confidence': strength}
+                return {
+                    'type': 'Trending Bull',
+                    'confidence': strength
+                }
             elif direction == 'bearish':
-                return {'type': 'Trending Bear', 'confidence': strength}
+                return {
+                    'type': 'Trending Bear',
+                    'confidence': strength
+                }
         
-        return {'type': 'Ranging', 'confidence': 1.0 - strength}
+        # Ranging market
+        return {
+            'type': 'Ranging',
+            'confidence': 1.0 - strength
+        }
     
-    def _get_regime_recommendations(self, regime: Dict, trend: Dict, volatility: Dict) -> Dict:
+    def _get_regime_recommendations(self, regime: Dict,
+                                   trend: Dict, volatility: Dict) -> Dict:
         """Get trading recommendations based on regime"""
+        
         regime_type = regime['type']
         
-        recommendations = {
-            'Trending Bull': {
+        if regime_type == 'Trending Bull':
+            return {
                 'buy_signals': 'Trust with increased position size (1.2x normal)',
                 'sell_signals': 'Be cautious - many are false reversals. Demand quality > 80',
                 'stop_loss': 'Trail stops tighter (+15% from normal)',
                 'timeframes': 'Prioritize 4h and 1d signals over 15m noise',
                 'strategy': 'Trend following - buy dips, avoid shorting',
                 'position_adjustment': 1.2
-            },
-            'Trending Bear': {
+            }
+        
+        elif regime_type == 'Trending Bear':
+            return {
                 'buy_signals': 'Be very cautious - demand quality > 85',
                 'sell_signals': 'Trust with increased position size (1.2x normal)',
                 'stop_loss': 'Use wider stops for shorts (-15% from normal)',
                 'timeframes': 'Prioritize 4h and 1d signals',
                 'strategy': 'Short rallies, avoid catching falling knives',
                 'position_adjustment': 1.2
-            },
-            'Ranging': {
+            }
+        
+        elif regime_type == 'Ranging':
+            return {
                 'buy_signals': 'Buy at support levels with quality > 70',
                 'sell_signals': 'Sell at resistance with quality > 70',
                 'stop_loss': 'Tight stops - range can break quickly',
                 'timeframes': 'Lower timeframes (1h, 15m) more relevant',
                 'strategy': 'Mean reversion - fade extremes',
                 'position_adjustment': 0.8
-            },
-            'High Volatility': {
+            }
+        
+        elif regime_type == 'High Volatility':
+            return {
                 'buy_signals': 'Reduce position sizes by 50%',
                 'sell_signals': 'Reduce position sizes by 50%',
                 'stop_loss': 'Use wider stops to avoid whipsaws',
@@ -1151,20 +984,21 @@ class MarketContextAnalyzer:
                 'strategy': 'Wait for volatility to subside, or trade breakouts only',
                 'position_adjustment': 0.5
             }
-        }
         
-        return recommendations.get(regime_type, {
-            'buy_signals': 'Standard approach',
-            'sell_signals': 'Standard approach',
-            'stop_loss': 'Standard stops',
-            'timeframes': 'All timeframes valid',
-            'strategy': 'Balanced approach',
-            'position_adjustment': 1.0
-        })
+        else:
+            return {
+                'buy_signals': 'Standard approach',
+                'sell_signals': 'Standard approach',
+                'stop_loss': 'Standard stops',
+                'timeframes': 'All timeframes valid',
+                'strategy': 'Balanced approach',
+                'position_adjustment': 1.0
+            }
     
     def _analyze_market_breadth(self) -> Dict:
         """Analyze how many symbols are trending in same direction"""
-        from crypto_agent.config import SYMBOLS
+        
+        from .config import SYMBOLS
         
         bullish_count = 0
         bearish_count = 0
@@ -1174,6 +1008,7 @@ class MarketContextAnalyzer:
             df = self.db.get_price_history(symbol, '1d', hours_back=168)
             if not df.empty and len(df) >= 7:
                 trend = self._calculate_trend(df)
+                
                 if trend['direction'] == 'bullish':
                     bullish_count += 1
                 elif trend['direction'] == 'bearish':
@@ -1195,6 +1030,7 @@ class MarketContextAnalyzer:
     
     def _assess_risk_level(self, regime: Dict, volatility: Dict) -> str:
         """Assess overall risk level"""
+        
         regime_type = regime['type']
         vol_level = volatility['level']
         
@@ -1228,10 +1064,12 @@ class MarketContextAnalyzer:
 class PredictionOutcomeTracker:
     """
     Tool 4: Prediction Outcome Tracker
-    (No changes needed)
+    
+    Logs agent recommendations and tracks outcomes for continuous learning
     """
     
     def __init__(self, db: AgentDatabase):
+        """Initialize outcome tracker"""
         self.db = db
         logger.info("📊 Prediction Outcome Tracker initialized")
     
@@ -1239,8 +1077,24 @@ class PredictionOutcomeTracker:
                           recommendation: str, confidence: float,
                           quality_score: int, consensus: Dict,
                           market_regime: str, reasoning: str) -> bool:
-        """Log a trading recommendation"""
+        """
+        Log a trading recommendation
         
+        Args:
+            symbol: Trading pair
+            timeframe: Timeframe
+            recommendation: BUY/SELL/HOLD
+            confidence: Confidence score (0-1)
+            quality_score: Quality score (0-100)
+            consensus: Consensus analyzer output
+            market_regime: Current market regime
+            reasoning: Human-readable reasoning
+            
+        Returns:
+            True if successfully logged
+        """
+        
+        # Get current price
         current_price = self.db.get_latest_price(symbol, timeframe)
         
         if not current_price:
@@ -1270,11 +1124,23 @@ class PredictionOutcomeTracker:
     def get_performance_stats(self, symbol: Optional[str] = None,
                              timeframe: Optional[str] = None,
                              days_back: int = 30) -> Dict:
-        """Get performance statistics for agent recommendations"""
+        """
+        Get performance statistics for agent recommendations
         
+        Args:
+            symbol: Filter by symbol (None = all)
+            timeframe: Filter by timeframe (None = all)
+            days_back: Days of history to analyze
+            
+        Returns:
+            Dict with performance metrics
+        """
+        
+        # Get historical recommendations
         if symbol and timeframe:
             historical = self.db.get_historical_signals(symbol, timeframe, days_back)
         else:
+            # Would need a method to get all signals - for now return empty
             logger.info("ℹ️ Performance stats for all symbols not yet implemented")
             return {}
         
@@ -1285,7 +1151,10 @@ class PredictionOutcomeTracker:
                 'note': 'No historical data available'
             }
         
+        # Calculate metrics
         total = len(historical)
+        
+        # 4-hour outcomes (most reliable)
         completed_4h = historical[historical['outcome_4h'].notna()]
         
         if len(completed_4h) == 0:
@@ -1297,9 +1166,13 @@ class PredictionOutcomeTracker:
         
         wins_4h = (completed_4h['outcome_4h'] == 'WIN').sum()
         losses_4h = (completed_4h['outcome_4h'] == 'LOSS').sum()
+        
         win_rate_4h = wins_4h / len(completed_4h) if len(completed_4h) > 0 else 0
+        
+        # Average return
         avg_return = completed_4h['return_4h'].mean() if 'return_4h' in completed_4h else 0
         
+        # By quality score
         quality_breakdown = {}
         for quality_range in [(90, 100), (80, 89), (70, 79), (60, 69), (0, 59)]:
             range_signals = completed_4h[
@@ -1315,6 +1188,7 @@ class PredictionOutcomeTracker:
                     'avg_return': range_signals['return_4h'].mean()
                 }
         
+        # Best and worst
         best_trade = completed_4h.loc[completed_4h['return_4h'].idxmax()] if len(completed_4h) > 0 else None
         worst_trade = completed_4h.loc[completed_4h['return_4h'].idxmin()] if len(completed_4h) > 0 else None
         
@@ -1338,8 +1212,19 @@ class PredictionOutcomeTracker:
             } if worst_trade is not None else None
         }
     
-    def get_insights(self, symbol: str, timeframe: str, days_back: int = 90) -> List[str]:
-        """Generate learned insights from historical performance"""
+    def get_insights(self, symbol: str, timeframe: str,
+                    days_back: int = 90) -> List[str]:
+        """
+        Generate learned insights from historical performance
+        
+        Args:
+            symbol: Trading pair
+            timeframe: Timeframe
+            days_back: Days to analyze
+            
+        Returns:
+            List of insight strings
+        """
         
         stats = self.get_performance_stats(symbol, timeframe, days_back)
         
@@ -1348,6 +1233,7 @@ class PredictionOutcomeTracker:
         
         insights = []
         
+        # Win rate insights
         win_rate = stats.get('win_rate_4h', 0)
         if win_rate > 0.70:
             insights.append(f"Excellent performance: {win_rate:.0%} win rate over {days_back} days")
@@ -1356,6 +1242,7 @@ class PredictionOutcomeTracker:
         elif win_rate < 0.45:
             insights.append(f"Warning: Low win rate ({win_rate:.0%}) - strategy needs review")
         
+        # Quality score insights
         quality_breakdown = stats.get('quality_breakdown', {})
         
         best_quality_range = None
@@ -1367,8 +1254,11 @@ class PredictionOutcomeTracker:
                 best_quality_range = quality_range
         
         if best_quality_range:
-            insights.append(f"Quality scores {best_quality_range} have best win rate: {best_win_rate:.0%}")
+            insights.append(
+                f"Quality scores {best_quality_range} have best win rate: {best_win_rate:.0%}"
+            )
         
+        # Return insights
         avg_return = stats.get('avg_return_4h', 0)
         if avg_return > 0.03:
             insights.append(f"Strong average return: {avg_return:+.2%}")

@@ -1,5 +1,5 @@
 """
-Configuration for Crypto Trading Agent - FIBONACCI & LEVERAGE ENHANCED
+Configuration for Crypto Trading Agent - FIXED VERSION
 Matches actual 2-model setup (catboost + xgboost)
 """
 
@@ -109,79 +109,6 @@ POSITION_SIZING = {
     'quality_below_60': (1, 2)
 }
 
-# ============================================================================
-# FIBONACCI & LEVERAGE CONFIGURATION - NEW
-# ============================================================================
-
-# Fibonacci levels for technical analysis
-FIBONACCI_LEVELS = {
-    'retracement': [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0],
-    'extension': [1.236, 1.382, 1.618, 2.0, 2.618]
-}
-
-# Take profit distribution (must sum to 100%)
-TP_DISTRIBUTION = {
-    'tp1': 30,  # Close 30% at TP1 (Fib 0.382)
-    'tp2': 40,  # Close 40% at TP2 (Fib 0.618)
-    'tp3': 30   # Close 30% at TP3 (Fib 1.0)
-}
-
-# Leverage settings (1x to 20x)
-LEVERAGE_CONFIG = {
-    'min_leverage': 1,
-    'max_leverage': 20,
-    
-    # Base leverage by confidence level
-    'confidence_tiers': {
-        'very_high': (8, 15),   # confidence >= 75%: suggest 8-15x
-        'high': (5, 10),         # confidence 60-75%: suggest 5-10x
-        'moderate': (3, 5),      # confidence 50-60%: suggest 3-5x
-        'low': (1, 3)            # confidence < 50%: suggest 1-3x
-    },
-    
-    # Quality score multipliers (adjust leverage based on quality)
-    'quality_multipliers': {
-        'excellent': 1.2,    # quality >= 80: boost leverage by 20%
-        'good': 1.0,         # quality >= 70: normal leverage
-        'fair': 0.8,         # quality >= 60: reduce leverage by 20%
-        'poor': 0.5          # quality < 60: reduce leverage by 50%
-    },
-    
-    # Safety caps
-    'max_recommended': 10,  # Never suggest more than 10x (safety)
-    'conservative_cap': 5   # For risk-averse traders
-}
-
-# Risk management settings
-RISK_MANAGEMENT = {
-    # Default stop loss percentages by timeframe
-    'default_stop_loss_pct': {
-        '5m': 0.015,   # 1.5%
-        '15m': 0.020,  # 2.0%
-        '1h': 0.025,   # 2.5%
-        '4h': 0.035,   # 3.5%
-        '1d': 0.050    # 5.0%
-    },
-    
-    # Maximum position size
-    'max_position_size_pct': 6.0,
-    
-    # Minimum acceptable risk/reward ratio
-    'min_risk_reward_ratio': 1.5,
-    
-    # Fibonacci-based TP levels (as ratios to use for calculation)
-    # These represent how far beyond the stop loss distance to set each TP
-    'fibonacci_tp_multipliers': {
-        'tp1': 0.382,   # 38.2% Fibonacci retracement (~1.5R)
-        'tp2': 0.618,   # 61.8% Golden ratio (~2.5R)
-        'tp3': 1.0      # 100% Fibonacci extension (~4R)
-    }
-}
-
-# ============================================================================
-# END OF FIBONACCI & LEVERAGE CONFIGURATION
-# ============================================================================
-
 # Available symbols and timeframes
 SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
 TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
@@ -212,17 +139,18 @@ LOGGING_CONFIG = {
 }
 
 # ============================================================================
-# CONFIGURATION SUMMARY:
+# KEY CHANGES MADE:
 # ============================================================================
-# 1. MODEL_WEIGHTS: Only catboost + xgboost (matches your actual models)
-# 2. SIGNAL_THRESHOLDS: Price change decimals (not quality scores)
-# 3. FIBONACCI_LEVELS: Golden ratio levels for TP calculation
-# 4. TP_DISTRIBUTION: How to split position across 3 take profit levels
-# 5. LEVERAGE_CONFIG: Dynamic 1-20x leverage based on confidence + quality
-# 6. RISK_MANAGEMENT: Stop loss %, Fibonacci multipliers, R:R ratios
+# 1. MODEL_WEIGHTS: Removed lightgbm and gru (you don't have these models)
+#    - Now only catboost + xgboost with proper weight distribution
 #
-# ✅ Supports 1x-20x leverage with intelligent scaling
-# ✅ Three Fibonacci-based take profit levels (0.382, 0.618, 1.0)
-# ✅ Position split: 30% at TP1, 40% at TP2, 30% at TP3
-# ✅ Dynamic stop loss based on timeframe and quality
+# 2. SIGNAL_THRESHOLDS: Changed from quality scores to price change decimals
+#    - OLD: {'strong_buy': 80, 'buy': 65, ...} ← These were quality scores!
+#    - NEW: Timeframe-specific price change thresholds in decimal form
+#    - Example: 0.0006 = 0.06% price change
+#
+# These fixes ensure:
+# ✅ Only actual models get weighted (no missing model issue)
+# ✅ Thresholds match your model predictions (0.01-0.2% range)
+# ✅ Different sensitivity per timeframe (5m more sensitive than 4h)
 # ============================================================================

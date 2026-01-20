@@ -1,5 +1,5 @@
 """
-Main Agent Orchestration - FIBONACCI & LEVERAGE ENHANCED
+Main Agent Orchestration
 Coordinates all tools and manages conversation flow
 """
 import logging
@@ -151,33 +151,8 @@ class CryptoTradingAgent:
                 'quality_details': quality,
                 'market_context': market_context,
                 'position_sizing': final_recommendation['position_sizing'],
-                
-                # Stop Loss
                 'stop_loss': final_recommendation.get('stop_loss'),
-                'stop_loss_pct': final_recommendation.get('stop_loss_pct'),
-                
-                # Take Profit Levels (Fibonacci)
-                'take_profit_1': final_recommendation.get('take_profit_1'),
-                'tp1_pct': final_recommendation.get('tp1_pct'),
-                'tp1_allocation': final_recommendation.get('tp1_allocation'),
-                'tp1_fib_level': final_recommendation.get('tp1_fib_level'),
-                
-                'take_profit_2': final_recommendation.get('take_profit_2'),
-                'tp2_pct': final_recommendation.get('tp2_pct'),
-                'tp2_allocation': final_recommendation.get('tp2_allocation'),
-                'tp2_fib_level': final_recommendation.get('tp2_fib_level'),
-                
-                'take_profit_3': final_recommendation.get('take_profit_3'),
-                'tp3_pct': final_recommendation.get('tp3_pct'),
-                'tp3_allocation': final_recommendation.get('tp3_allocation'),
-                'tp3_fib_level': final_recommendation.get('tp3_fib_level'),
-                
-                # Leverage
-                'suggested_leverage': final_recommendation.get('suggested_leverage'),
-                'leverage_range': final_recommendation.get('leverage_range'),
-                'leverage_note': final_recommendation.get('leverage_note'),
-                'risk_reward_ratio': final_recommendation.get('risk_reward_ratio'),
-                
+                'take_profit': final_recommendation.get('take_profit'),
                 'reasoning': final_recommendation['reasoning'],
                 'risk_factors': final_recommendation['risk_factors'],
                 'should_trade': final_recommendation['should_trade']
@@ -302,51 +277,20 @@ class CryptoTradingAgent:
         position_min *= position_adjustment
         position_max *= position_adjustment
         
-        # ============================================================================
-        # FIBONACCI-BASED TARGETS & LEVERAGE CALCULATION
-        # ============================================================================
+        # Calculate stop loss and take profit
+        stop_loss_pct = self._calculate_stop_loss(timeframe, quality_score)
+        take_profit_pct = self._calculate_take_profit(timeframe, quality_score, consensus)
         
-        # Initialize default values
         stop_loss_price = None
-        take_profit_1 = None
-        take_profit_2 = None
-        take_profit_3 = None
-        suggested_leverage = 1
-        leverage_range = (1, 1)
-        leverage_note = "No leverage"
-        risk_reward_ratio = 0
-        fib_targets = {}
+        take_profit_price = None
         
         if current_price and should_trade:
-            # Determine direction for Fibonacci calculation
-            fib_direction = 'UP' if adjusted_action in ['BUY', 'STRONG_BUY'] else 'DOWN'
-            
-            # Calculate all targets using Fibonacci method
-            fib_targets = self.quality_scorer.calculate_fibonacci_targets(
-                entry_price=current_price,
-                direction=fib_direction,
-                timeframe=timeframe,
-                quality_score=quality_score,
-                consensus_confidence=base_confidence
-            )
-            
-            # Extract values
-            stop_loss_price = fib_targets['stop_loss']
-            stop_loss_pct = fib_targets['stop_loss_pct'] / 100  # Convert to decimal
-            
-            # Three take profit levels
-            take_profit_1 = fib_targets['take_profit_1']
-            take_profit_2 = fib_targets['take_profit_2']
-            take_profit_3 = fib_targets['take_profit_3']
-            
-            # Leverage information
-            suggested_leverage = fib_targets['suggested_leverage']
-            leverage_range = fib_targets['leverage_range']
-            leverage_note = fib_targets['leverage_note']
-            risk_reward_ratio = fib_targets['risk_reward_ratio']
-        else:
-            # Use old calculation for non-tradeable signals
-            stop_loss_pct = self._calculate_stop_loss(timeframe, quality_score)
+            if adjusted_action in ['BUY', 'STRONG_BUY']:
+                stop_loss_price = current_price * (1 - stop_loss_pct)
+                take_profit_price = current_price * (1 + take_profit_pct)
+            elif adjusted_action in ['SELL', 'STRONG_SELL']:
+                stop_loss_price = current_price * (1 + stop_loss_pct)
+                take_profit_price = current_price * (1 - take_profit_pct)
         
         # Generate reasoning
         reasoning = self._generate_reasoning(
@@ -363,33 +307,10 @@ class CryptoTradingAgent:
             'confidence': adjusted_confidence,
             'should_trade': should_trade,
             'position_sizing': (round(position_min, 1), round(position_max, 1)),
-            
-            # Stop Loss
             'stop_loss': stop_loss_price,
-            'stop_loss_pct': stop_loss_pct if stop_loss_price else 0,
-            
-            # Take Profit Levels (Fibonacci-based)
-            'take_profit_1': take_profit_1,
-            'tp1_pct': fib_targets.get('tp1_pct', 0) / 100 if fib_targets else 0,
-            'tp1_allocation': fib_targets.get('tp1_allocation', 30),
-            'tp1_fib_level': fib_targets.get('tp1_fib_level', '0.382'),
-            
-            'take_profit_2': take_profit_2,
-            'tp2_pct': fib_targets.get('tp2_pct', 0) / 100 if fib_targets else 0,
-            'tp2_allocation': fib_targets.get('tp2_allocation', 40),
-            'tp2_fib_level': fib_targets.get('tp2_fib_level', '0.618'),
-            
-            'take_profit_3': take_profit_3,
-            'tp3_pct': fib_targets.get('tp3_pct', 0) / 100 if fib_targets else 0,
-            'tp3_allocation': fib_targets.get('tp3_allocation', 30),
-            'tp3_fib_level': fib_targets.get('tp3_fib_level', '1.0'),
-            
-            # Leverage
-            'suggested_leverage': suggested_leverage,
-            'leverage_range': leverage_range,
-            'leverage_note': leverage_note,
-            'risk_reward_ratio': risk_reward_ratio,
-            
+            'stop_loss_pct': stop_loss_pct,
+            'take_profit': take_profit_price,
+            'take_profit_pct': take_profit_pct,
             'reasoning': reasoning,
             'risk_factors': risk_factors,
             'regime_adjustment': position_adjustment
@@ -413,7 +334,7 @@ class CryptoTradingAgent:
         return 0
     
     def _calculate_stop_loss(self, timeframe: str, quality_score: int) -> float:
-        """Calculate stop loss percentage based on timeframe and quality (LEGACY - for non-tradeable signals)"""
+        """Calculate stop loss percentage based on timeframe and quality"""
         
         # Base stop loss by timeframe
         base_stops = {
@@ -433,6 +354,28 @@ class CryptoTradingAgent:
             return base
         else:
             return base * 1.1
+    
+    def _calculate_take_profit(self, timeframe: str, quality_score: int,
+                               consensus: Dict) -> float:
+        """Calculate take profit percentage"""
+        
+        # Use predicted price change if available
+        predicted_change = abs(consensus.get('weighted_price_change', 0))
+        
+        if predicted_change > 0.01:  # Use prediction if > 1%
+            # Target 80% of predicted move (conservative)
+            return predicted_change * 0.8
+        
+        # Otherwise use quality-based targets
+        if quality_score >= 85:
+            multiplier = 2.5  # 2.5x risk
+        elif quality_score >= 75:
+            multiplier = 2.0
+        else:
+            multiplier = 1.5
+        
+        stop_loss = self._calculate_stop_loss(timeframe, quality_score)
+        return stop_loss * multiplier
     
     def _generate_reasoning(self, consensus: Dict, quality: Dict,
                            market_context: Dict, action: str,
@@ -539,7 +482,7 @@ class CryptoTradingAgent:
         }
     
     def format_recommendation(self, analysis: Dict) -> str:
-        """Format analysis as human-readable recommendation with Fibonacci targets"""
+        """Format analysis as human-readable recommendation"""
         
         symbol = analysis['symbol']
         timeframe = analysis['timeframe']
@@ -585,59 +528,22 @@ class CryptoTradingAgent:
             for risk in analysis['risk_factors'][:3]:
                 lines.append(f"   - {risk}")
         
-        # Trading details (if should trade) - FIBONACCI ENHANCED
+        # Trading details (if should trade)
         if should_trade and analysis.get('stop_loss'):
             lines.append(f"\n💼 Trading Plan:")
-            
-            # Entry and Leverage
-            lines.append(f"   📍 Entry: ${current_price:,.2f}")
-            leverage = analysis.get('suggested_leverage', 1)
-            lev_range = analysis.get('leverage_range', (1, 1))
-            lev_note = analysis.get('leverage_note', '')
-            lines.append(f"   ⚡ Leverage: {leverage}x (Range: {lev_range[0]}-{lev_range[1]}x)")
-            if lev_note:
-                lines.append(f"      {lev_note}")
-            
-            # Risk/Reward
-            rr_ratio = analysis.get('risk_reward_ratio', 0)
-            if rr_ratio > 0:
-                lines.append(f"      Risk/Reward: 1:{rr_ratio:.2f}")
-            
-            # Stop Loss
-            stop_loss_pct = analysis.get('stop_loss_pct', 0)
-            lines.append(f"\n   🛡️ Stop Loss: ${analysis['stop_loss']:,.2f} (-{stop_loss_pct:.2%})")
-            
-            # Take Profit Levels (Fibonacci)
-            if analysis.get('take_profit_1'):
-                lines.append(f"\n   🎯 Take Profit Levels (Fibonacci-based):")
-                
-                # TP1
-                tp1 = analysis['take_profit_1']
-                tp1_pct = analysis.get('tp1_pct', 0)
-                tp1_alloc = analysis.get('tp1_allocation', 30)
-                tp1_fib = analysis.get('tp1_fib_level', '0.382')
-                lines.append(f"      TP1: ${tp1:,.2f} (+{tp1_pct:.2%}) [Fib {tp1_fib}] - Close {tp1_alloc}%")
-                
-                # TP2
-                tp2 = analysis['take_profit_2']
-                tp2_pct = analysis.get('tp2_pct', 0)
-                tp2_alloc = analysis.get('tp2_allocation', 40)
-                tp2_fib = analysis.get('tp2_fib_level', '0.618')
-                lines.append(f"      TP2: ${tp2:,.2f} (+{tp2_pct:.2%}) [Fib {tp2_fib}] - Close {tp2_alloc}%")
-                
-                # TP3
-                tp3 = analysis['take_profit_3']
-                tp3_pct = analysis.get('tp3_pct', 0)
-                tp3_alloc = analysis.get('tp3_allocation', 30)
-                tp3_fib = analysis.get('tp3_fib_level', '1.0')
-                lines.append(f"      TP3: ${tp3:,.2f} (+{tp3_pct:.2%}) [Fib {tp3_fib}] - Close {tp3_alloc}%")
-            
-            # Position Sizing Recommendations
             pos_min, pos_max = analysis['position_sizing']
-            lines.append(f"\n   💰 Position Sizing Recommendations:")
-            lines.append(f"      Conservative (1x-{max(1, leverage//2)}x): {pos_min:.1f}% of portfolio")
-            lines.append(f"      Moderate ({max(2, leverage//2)}x-{leverage}x): {(pos_min + pos_max)/2:.1f}% of portfolio")
-            lines.append(f"      Aggressive ({leverage}x-{min(20, leverage*2)}x): {pos_max:.1f}% of portfolio")
+            lines.append(f"   Position Size: {pos_min:.1f}% - {pos_max:.1f}% of portfolio")
+            
+            # Calculate stop loss and take profit percentages from prices
+            current_price = self.db.get_latest_price(symbol, timeframe)
+            if current_price:
+                stop_loss_pct = abs(analysis['stop_loss'] - current_price) / current_price
+                take_profit_pct = abs(analysis['take_profit'] - current_price) / current_price
+                lines.append(f"   Stop Loss: ${analysis['stop_loss']:,.2f} ({stop_loss_pct:.1%})")
+                lines.append(f"   Take Profit: ${analysis['take_profit']:,.2f} ({take_profit_pct:.1%})")
+            else:
+                lines.append(f"   Stop Loss: ${analysis['stop_loss']:,.2f}")
+                lines.append(f"   Take Profit: ${analysis['take_profit']:,.2f}")
         
         # Market context
         market = analysis['market_context']
