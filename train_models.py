@@ -1,17 +1,10 @@
 """
-Optimized ML System v2.0 - Enhanced with Feature Selection & Hyperparameter Tuning
-============================================================================
-Models: CatBoost + XGBoost (2 models only - optimized based on empirical data)
-Features: SelectKBest with top 50 features (reduced from 71)
-Tuning: Optuna hyperparameter optimization (one-time per symbol/timeframe)
-Database: ml_crypto_data.db (unified database)
-
-Changes from v1:
-- Reduced from 4 models to 2 (CatBoost + XGBoost)
-- Added intelligent feature selection (mutual_info_classif)
-- Added Optuna hyperparameter tuning
-- Saved optimal parameters to config for fast retraining
-- 50% reduction in training time and storage
+Optimized ML System - Feature Selection & Hyperparameter Tuning
+====================================================================
+Models: CatBoost + XGBoost
+Features: SelectKBest with top 50 features
+Tuning: Optuna hyperparameter optimization
+Database: ml_crypto_data.db
 """
 import os
 import sys
@@ -78,7 +71,7 @@ class OptimizedMLSystemV2:
     """
     
     def __init__(self, db_path='data/ml_crypto_data.db'):
-        """Initialize the optimized ML system v2"""
+        """Initialize the optimized ML system"""
         self.db_path = db_path
         self.models = {}
         self.scalers = {}
@@ -107,7 +100,7 @@ class OptimizedMLSystemV2:
         # Setup logging
         self.log_file = self._setup_logging()
         
-        logging.info("🧠 Optimized ML System v2.0 initialized")
+        logging.info("🧠 Optimized ML System initialized")
         logging.info(f"📁 Database: {self.db_path}")
         logging.info(f"📝 Log file: {self.log_file}")
         logging.info("✨ Enhancements:")
@@ -125,7 +118,7 @@ class OptimizedMLSystemV2:
     def _setup_logging(self):
         """Setup logging to both console and file"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file = f'logs/ml_training_v2_{timestamp}.log'
+        log_file = f'logs/ml_training_{timestamp}.log'
         
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
@@ -848,40 +841,62 @@ class OptimizedMLSystemV2:
         return predictions
 
 
+
 def main():
     """Main execution"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Train ML models for crypto trading')
+    parser.add_argument('--auto-run', action='store_true', 
+                       help='Skip interactive prompts (for automation)')
+    parser.add_argument('--optimize', action='store_true',
+                       help='Run hyperparameter optimization (slow)')
+    parser.add_argument('--symbols', nargs='+',
+                       help='Specific symbols to train (default: all)')
+    parser.add_argument('--timeframes', nargs='+',
+                       help='Specific timeframes to train (default: all)')
+    args = parser.parse_args()
+    
     print("\n" + "="*70)
-    print("🧠 OPTIMIZED ML TRAINING SYSTEM V2.0")
+    print("🧠 OPTIMIZED ML TRAINING SYSTEM")
     print("="*70)
-    print("\nEnhancements:")
-    print("  • 2 models only: CatBoost + XGBoost (50% faster)")
+    print("\nFeatures:")
+    print("  • Models: CatBoost + XGBoost")
     print("  • Feature selection: Top 50 features")
-    print("  • Hyperparameter optimization: Optuna")
-    print("  • 50% reduction in storage and training time")
+    print("  • Hyperparameter optimization: Optuna (optional)")
     print("\n" + "="*70 + "\n")
     
     # Initialize system
     ml_system = OptimizedMLSystemV2()
     
     # Symbols and timeframes
-    symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
-    timeframes = ['5m', '15m', '1h', '4h', '1d']
+    symbols = args.symbols if args.symbols else ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
+    timeframes = args.timeframes if args.timeframes else ['5m', '15m', '1h', '4h', '1d']
     
     print("\n📋 Training Plan:")
     print(f"   Symbols: {', '.join(symbols)}")
     print(f"   Timeframes: {', '.join(timeframes)}")
     print(f"   Models per symbol/timeframe: 4 (2 price + 2 direction)")
     print(f"   Total models: {len(symbols) * len(timeframes) * 4} models")
-    print(f"   (50% reduction from previous 8 models per combo)\n")
+    print("\n")
     
-    # Ask about optimization
-    optimize = input("Run hyperparameter optimization? (y/N): ").strip().lower() == 'y'
-    if optimize:
-        print("⏰ Warning: Optimization will take 2-3 hours total")
+    # Determine optimization mode
+    if args.auto_run:
+        optimize = args.optimize
+        if optimize:
+            print("⏰ Running with hyperparameter optimization (2-3 hours)")
+        else:
+            print("⚡ Using default parameters (fast training)")
+        print("🤖 Auto-run mode: Starting immediately...\n")
     else:
-        print("⚡ Using default parameters (fast training)")
-    
-    input("\nPress ENTER to start training... ")
+        # Interactive mode
+        optimize = input("Run hyperparameter optimization? (y/N): ").strip().lower() == 'y'
+        if optimize:
+            print("⏰ Warning: Optimization will take 2-3 hours total")
+        else:
+            print("⚡ Using default parameters (fast training)")
+        
+        input("\nPress ENTER to start training... ")
     
     # Track progress
     total_trained = 0

@@ -50,7 +50,7 @@ class CryptoAutomationScheduler:
         try:
             # Using subprocess to run the existing script
             # In a future refactor, this should call a python function directly
-            cmd = [sys.executable, 'comprehensive_ml_collector_v2.py']
+            cmd = [sys.executable, 'collect_data.py']
             
             # Check for force update logic (could be implemented here or in the script)
             # For now running standard collection
@@ -68,7 +68,7 @@ class CryptoAutomationScheduler:
     def run_signal_analysis(self):
         logger.info("Starting signal analysis job...")
         try:
-            cmd = [sys.executable, 'unified_crypto_analyzer.py']
+            cmd = [sys.executable, 'analyze_signals.py']
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode == 0:

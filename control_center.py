@@ -166,7 +166,7 @@ class CryptoControlCenter:
         print(f"   Overall Health: {health_status} ({health_score}/100)")
         
         if not status['ml_models']:
-            print(f"\n💡 TIP: Train ML models (option M) to enable predictions!")
+            print(f"\n💡 TIP: Train ML models (Step 2) to enable predictions!")
         
         return status
 
@@ -174,30 +174,22 @@ class CryptoControlCenter:
         """Display the main menu"""
         print("\n🎯 CONTROL CENTER MENU")
         print("-" * 35)
-        print("📊 DATA & ANALYSIS:")
-        print("   1. 📈 Collect Market Data")
-        print("   2. 🔍 Analyze Trading Signals (ML + TA)")
-        print("   3. 📋 View Latest Signals")
+        print("🛠️  MANUAL 4-STEP WORKFLOW:")
+        print("   1. 📈 Step 1: Collect Market Data (collect_data.py)")
+        print("   2. 🧠 Step 2: Train ML Models (train_models.py)")
+        print("   3. 🔮 Step 3: Generate Predictions (generate_predictions.py)")
+        print("   4. 🤖 Step 4: Run Autonomous Agent (run_agent.py)")
         print("")
-        print("🧠 MACHINE LEARNING:")
-        print("   M. 🤖 Train ML Models")
-        print("   P. 🔮 Test ML Predictions")
-        print("   V. 📊 View Model Status")
-        print("")
-        print("🤖 AUTOMATION:")
-        print("   4. 🚀 Start 24/7 Automation")
-        print("   5. 🛑 Stop Automation")
-        print("   6. 📊 Automation Status")
+        print("🤖 AUTOMATION & SCHEDULING:")
+        print("   5. 🚀 Start 24/7 Scheduler (Background)")
+        print("   6. 🛑 Stop Scheduler")
+        print("   7. 📊 Scheduler Status")
         print("")
         print("⚙️ SYSTEM MANAGEMENT:")
-        print("   7. 🔧 Configuration")
-        print("   8. 📋 View Logs")
-        print("   9. 🧹 System Cleanup")
-        print("")
-        print("📈 ADVANCED:")
-        print("   A. 🎯 Performance Analysis")
-        print("   B. 📊 Market Overview")
-        print("   C. 🔄 Quick System Test")
+        print("   8. 🔧 Configuration")
+        print("   9. 📋 View Logs")
+        print("   10. 🧹 System Cleanup")
+        print("   11. 🔄 Quick System Test")
         print("")
         print("❓ HELP & EXIT:")
         print("   H. ❓ Help & Documentation")
@@ -206,7 +198,7 @@ class CryptoControlCenter:
 
     def collect_data(self):
         """Run data collection with unified ML collector"""
-        print("\n📊 MARKET DATA COLLECTION")
+        print("\n📈 STEP 1: COLLECT MARKET DATA")
         print("-" * 40)
         
         print("Choose collection mode:")
@@ -243,7 +235,7 @@ class CryptoControlCenter:
 
     def _run_collector(self, args):
         """Run the unified ML collector"""
-        cmd = [sys.executable, 'comprehensive_ml_collector_v2.py'] + args
+        cmd = [sys.executable, 'collect_data.py'] + args
         
         try:
             print(f"⚙️ Running: {' '.join(cmd)}")
@@ -298,42 +290,24 @@ class CryptoControlCenter:
         print(f"\n📋 Custom collection starting...")
         self._run_collector(args)
 
-    def analyze_signals(self):
-        """Run unified signal analysis"""
-        print("\n🔍 TRADING SIGNAL ANALYSIS (ML + TA)")
+    def generate_predictions(self):
+        """Step 3: Generate Predictions"""
+        print("\n🔮 STEP 3: GENERATE PREDICTIONS")
         print("-" * 40)
         
         if not os.path.exists(self.db_path):
-            print("❌ No database found! Please collect data first.")
+            print("❌ No database found! Please collect data first (Step 1).")
             return
-        
-        print("Choose analysis mode:")
-        print("1. 🎯 All Symbols (Multi-timeframe)")
-        print("2. 📊 Specific Symbol Analysis")
-        print("3. 💾 Save Results to File")
-        
-        choice = input("\nSelect option (1-3): ").strip()
-        
-        if choice == "1":
-            print("🎯 Running comprehensive analysis...")
-            self._run_analyzer([])
             
-        elif choice == "2":
-            self._single_symbol_analysis()
-            
-        elif choice == "3":
-            print("📊 Running analysis and saving results...")
-            self._run_analyzer(['--save'])
-            
-        else:
-            print("❌ Invalid choice")
+        print("Generating predictions from trained ML models...")
+        self._run_script('generate_predictions.py')
 
-    def _run_analyzer(self, args):
-        """Run the unified crypto analyzer"""
-        cmd = [sys.executable, 'unified_crypto_analyzer.py'] + args
+    def _run_script(self, script_name, args=[]):
+        """Helper to run a python script"""
+        cmd = [sys.executable, script_name] + args
         
         try:
-            print(f"⚙️ Running analysis...")
+            print(f"⚙️ Running: {script_name}")
             print("⏳ Please wait...")
             
             process = subprocess.Popen(
@@ -352,62 +326,37 @@ class CryptoControlCenter:
             process.wait()
             
             if process.returncode == 0:
-                print("✅ Signal analysis completed successfully!")
+                print(f"✅ {script_name} completed successfully!")
             else:
-                print("❌ Signal analysis completed with errors")
+                print(f"❌ {script_name} completed with errors")
                 
         except Exception as e:
-            print(f"❌ Error running signal analysis: {e}")
+            print(f"❌ Error running {script_name}: {e}")
 
-    def _single_symbol_analysis(self):
-        """Analyze signals for a single symbol"""
-        print("\n🔍 SINGLE SYMBOL ANALYSIS")
-        print("-" * 30)
+    def run_agent_manual(self):
+        """Step 4: Run Autonomous Agent"""
+        print("\n🤖 STEP 4: RUN AUTONOMOUS AGENT")
+        print("-" * 40)
         
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT symbol FROM price_data ORDER BY symbol")
-            symbols = [row[0] for row in cursor.fetchall()]
-            conn.close()
-            
-            if not symbols:
-                print("❌ No symbols found in database")
-                return
-            
-            print("Available symbols:")
-            for i, symbol in enumerate(symbols, 1):
-                print(f"   {i}. {symbol}")
-            
-            try:
-                choice = int(input(f"\nSelect symbol (1-{len(symbols)}): "))
-                if 1 <= choice <= len(symbols):
-                    selected_symbol = symbols[choice - 1]
-                    print(f"🔍 Analyzing {selected_symbol}...")
-                    self._run_analyzer(['--symbols', selected_symbol])
-                else:
-                    print("❌ Invalid selection")
-            except ValueError:
-                print("❌ Invalid input")
-                
-        except Exception as e:
-            print(f"❌ Error getting symbols: {e}")
+        print("Running autonomous agent analysis...")
+        self._run_script('run_agent.py')
 
     def train_ml_models(self):
         """Train ML models"""
-        print("\n🧠 ML MODEL TRAINING")
+        print("\n🧠 STEP 2: ML MODEL TRAINING")
         print("-" * 40)
         
         if not os.path.exists(self.db_path):
-            print("❌ No database found! Please collect data first.")
+            print("❌ No database found! Please collect data first (Step 1).")
             return
         
         print("ML Training Options:")
         print("1. 🚀 Train All Models (All symbols + timeframes)")
         print("2. ⚡ Quick Training (1h and 4h only)")
         print("3. 🎯 Custom Training")
+        print("4. 📊 View Model Status")
         
-        choice = input("\nSelect option (1-3): ").strip()
+        choice = input("\nSelect option (1-4): ").strip()
         
         if choice == "1":
             print("\n🚀 TRAINING ALL MODELS")
@@ -434,20 +383,23 @@ class CryptoControlCenter:
             
             confirm = input("\nStart training? (y/n): ").lower()
             if confirm == 'y':
-                # Just run the existing optimized_ml_system.py
-                self._run_ml_training_direct('optimized_ml_system.py')
+                # Just run the existing train_models.py
+                self._run_ml_training_direct('train_models.py')
             else:
                 print("❌ Training cancelled")
                 
         elif choice == "3":
             self._custom_ml_training()
             
+        elif choice == "4":
+            self.view_model_status()
+            
         else:
             print("❌ Invalid choice")
 
     def _run_ml_training(self, args):
         """Run ML training"""
-        cmd = [sys.executable, 'optimized_ml_system.py'] + args
+        cmd = [sys.executable, 'train_models.py'] + args
         
         try:
             print(f"⚙️ Starting ML training...")
@@ -471,7 +423,7 @@ class CryptoControlCenter:
             
             if process.returncode == 0:
                 print("\n✅ ML training completed successfully!")
-                print("💡 Run 'View Model Status' (option V) to see trained models")
+                print("💡 Run 'View Model Status' (option 4) to see trained models")
             else:
                 print("\n❌ ML training completed with errors")
                 
@@ -521,27 +473,7 @@ class CryptoControlCenter:
         print("📝 Edit train_all_timeframes.py to customize symbols/timeframes")
         input("\nPress Enter to continue...")
 
-    def test_ml_predictions(self):
-        """Test ML predictions"""
-        print("\n🔮 ML PREDICTION TEST")
-        print("-" * 40)
-        
-        if not os.path.exists('ml_models'):
-            print("❌ No ML models found! Train models first (option M).")
-            return
-        
-        print("Checking available models...")
-        model_files = [f for f in os.listdir('ml_models') if f.endswith('.joblib')]
-        
-        if not model_files:
-            print("❌ No trained models found in ml_models/")
-            return
-        
-        print(f"✅ Found {len(model_files)} model files")
-        print("\n🔮 Running prediction test...")
-        
-        # Run a quick analysis which will show ML predictions
-        self._run_analyzer([])
+
 
     def view_model_status(self):
         """View ML model status"""
@@ -550,7 +482,7 @@ class CryptoControlCenter:
         
         if not os.path.exists('ml_models'):
             print("❌ ml_models directory not found")
-            print("💡 Train models first using option M")
+            print("💡 Train models first using Step 2")
             return
         
         try:
@@ -605,85 +537,14 @@ class CryptoControlCenter:
             print(f"   Coverage: {coverage_pct:.1f}%")
             
             if coverage_pct < 100:
-                print(f"\n💡 TIP: Train all timeframes for 100% coverage (option M)")
+                print(f"\n💡 TIP: Train all timeframes for 100% coverage (Step 2)")
             else:
                 print(f"\n🎉 Complete model coverage achieved!")
                 
         except Exception as e:
             print(f"❌ Error viewing model status: {e}")
 
-    def view_latest_signals(self):
-        """View the latest trading signals"""
-        print("\n📋 LATEST TRADING SIGNALS")
-        print("-" * 40)
-        
-        if not os.path.exists(self.db_path):
-            print("❌ No database found! Please collect data first.")
-            return
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            
-            query = """
-            SELECT 
-                symbol,
-                timeframe,
-                COUNT(*) as record_count,
-                MAX(timestamp) as latest_timestamp,
-                AVG(close) as avg_price
-            FROM price_data 
-            GROUP BY symbol, timeframe 
-            ORDER BY symbol, 
-                CASE timeframe 
-                    WHEN '5m' THEN 1
-                    WHEN '15m' THEN 2
-                    WHEN '1h' THEN 3
-                    WHEN '4h' THEN 4
-                    WHEN '1d' THEN 5
-                    ELSE 6
-                END
-            """
-            
-            df = pd.read_sql_query(query, conn)
-            conn.close()
-            
-            if df.empty:
-                print("❌ No data available in database")
-                return
-            
-            print(f"📊 DATA SUMMARY:")
-            print(f"{'Symbol':<12} {'Timeframe':<10} {'Records':<8} {'Avg Price':<12} {'Latest Data'}")
-            print("-" * 70)
-            
-            for _, row in df.iterrows():
-                latest_dt = pd.to_datetime(row['latest_timestamp'])
-                hours_old = (datetime.now() - latest_dt).total_seconds() / 3600
-                
-                if hours_old < 2:
-                    status = "🟢"
-                elif hours_old < 24:
-                    status = "🟡"
-                else:
-                    status = "🔴"
-                
-                print(f"{row['symbol']:<12} {row['timeframe']:<10} {row['record_count']:<8} "
-                      f"${row['avg_price']:<11.2f} {status} {latest_dt.strftime('%m-%d %H:%M')}")
-            
-            symbols = df['symbol'].unique()
-            print(f"\n🎯 QUICK OVERVIEW:")
-            print(f"   📈 Symbols tracked: {len(symbols)}")
-            print(f"   ⏱️  Total records: {df['record_count'].sum():,}")
-            
-            df['hours_old'] = df['latest_timestamp'].apply(
-                lambda x: (datetime.now() - pd.to_datetime(x)).total_seconds() / 3600
-            )
-            fresh_data = len(df[df['hours_old'] < 2])
-            print(f"   🟢 Fresh datasets: {fresh_data}/{len(df)}")
-            
-            print(f"\n💡 Run signal analysis (option 2) for ML predictions!")
-            
-        except Exception as e:
-            print(f"❌ Error viewing signals: {e}")
+
 
     def start_automation(self):
         """Start the 24/7 automation system"""
@@ -1007,12 +868,7 @@ class CryptoControlCenter:
                                 total += os.path.getsize(fp)
                         print(f"   {name}: {total/(1024*1024):.1f} MB")
 
-    def market_overview(self):
-        """Show market overview"""
-        print("\n📊 MARKET OVERVIEW")
-        print("-" * 30)
-        print("💡 Running unified analyzer for market overview...")
-        self._run_analyzer([])
+
 
     def quick_system_test(self):
         """Run quick system test"""
@@ -1069,11 +925,11 @@ class CryptoControlCenter:
 
     def _test_collector(self):
         """Test collector script"""
-        return os.path.exists('comprehensive_ml_collector.py')
+        return os.path.exists('collect_data.py')
 
     def _test_analyzer(self):
         """Test analyzer script"""
-        return os.path.exists('unified_crypto_analyzer.py')
+        return os.path.exists('analyze_signals.py')
 
     def show_help(self):
         """Show help"""
@@ -1086,25 +942,33 @@ class CryptoControlCenter:
    • ML predictions with LightGBM, XGBoost, CatBoost
    • Technical analysis across 5 timeframes
    • Multi-symbol tracking (BTC, ETH, BNB, ADA, DOT)
-   • Automated data collection and analysis
+   • Autonomous agent decision making
 
-🧠 MACHINE LEARNING:
-   • Train models on historical data (option M)
-   • Get ML-powered predictions (option 2)
-   • View model status and coverage (option V)
-   • Test predictions (option P)
+🧠 4-STEP WORKFLOW:
+   1. 📈 Collect Data (Option 1)
+      - Runs collect_data.py
+      - Gathers market history for training
+   
+   2. 🧠 Train Models (Option 2)
+      - Runs train_models.py
+      - Trains ensemble models on data covers
+   
+   3. 🔮 Generate Predictions (Option 3)
+      - Runs generate_predictions.py
+      - Creates ML predictions for all symbols/timeframes
+   
+   4. 🤖 Run Agent (Option 4)
+      - Runs run_agent.py
+      - Analyzes signals and recommends trades
 
-📋 GETTING STARTED:
-   1. Collect data (option 1 - choose full collection)
-   2. Train ML models (option M)
-   3. Analyze signals (option 2)
-   4. Start automation (option 4)
+🤖 AUTOMATION:
+   • Start 24/7 Scheduler (Option 5) covers steps 1-4 automatically.
+   • View status with Option 7.
 
 💡 TIPS:
    • More data = better models (collect 6+ months)
    • Train all timeframes for best coverage
-   • ML + TA together gives strongest signals
-   • Check model status regularly (option V)
+   • Check "View Model Status" (Step 2, Option 4) regularly
 
 For detailed documentation, see the README files.
         """)
@@ -1122,38 +986,30 @@ For detailed documentation, see the README files.
                 if choice == "1":
                     self.collect_data()
                 elif choice == "2":
-                    self.analyze_signals()
-                elif choice == "3":
-                    self.view_latest_signals()
-                elif choice == "M":
                     self.train_ml_models()
-                elif choice == "P":
-                    self.test_ml_predictions()
-                elif choice == "V":
-                    self.view_model_status()
+                elif choice == "3":
+                    self.generate_predictions()
                 elif choice == "4":
-                    self.start_automation()
+                    self.run_agent_manual()
                 elif choice == "5":
-                    self.stop_automation()
+                    self.start_automation()
                 elif choice == "6":
-                    self.automation_status()
+                    self.stop_automation()
                 elif choice == "7":
-                    self.configure_system()
+                    self.automation_status()
                 elif choice == "8":
-                    self.view_logs()
+                    self.configure_system()
                 elif choice == "9":
+                    self.view_logs()
+                elif choice == "10":
                     self.cleanup_system()
-                elif choice == "A":
-                    print("Performance analysis - use option 2 for ML analysis")
-                elif choice == "B":
-                    self.market_overview()
-                elif choice == "C":
+                elif choice == "11":
                     self.quick_system_test()
                 elif choice == "H":
                     self.show_help()
                 elif choice == "0":
                     print("\n👋 Thank you for using Crypto Trading Control Center!")
-                    print("🚀 Happy trading with ML-powered predictions!")
+                    print("🚀 Happy trading!")
                     break
                 else:
                     print("❌ Invalid choice. Please select a valid option.")
@@ -1173,7 +1029,7 @@ def main():
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.chdir(script_dir)
         
-        if not os.path.exists('comprehensive_ml_collector.py'):
+        if not os.path.exists('collect_data.py'):
             print("⚠️ Warning: Core system files not found")
             print("💡 Make sure you're in the right directory")
             print()

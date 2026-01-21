@@ -1154,16 +1154,16 @@ def main():
         epilog="""
 Examples:
   # Analyze all symbols
-  python unified_crypto_analyzer.py
+  python analyze_signals.py
   
   # Analyze specific symbols
-  python unified_crypto_analyzer.py --symbols BTC/USDT ETH/USDT
+  python analyze_signals.py --symbols BTC/USDT ETH/USDT
   
   # Show database summary
-  python unified_crypto_analyzer.py --summary
+  python analyze_signals.py --summary
   
   # Save results to file
-  python unified_crypto_analyzer.py --save
+  python analyze_signals.py --save
         """
     )
     

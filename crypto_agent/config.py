@@ -1,6 +1,5 @@
 """
-Configuration for Crypto Trading Agent - FIBONACCI & LEVERAGE ENHANCED
-Matches actual 2-model setup (catboost + xgboost)
+Configuration for Crypto Trading Agent
 """
 
 # Database configuration
@@ -14,10 +13,7 @@ AGENT_CONFIG = {
     'temperature': 0.7,
 }
 
-# ============================================================================
-# CRITICAL FIX: Model weights by timeframe
-# UPDATED: UPPERCASE to match database storage (CATBOOST, XGBOOST)
-# ============================================================================
+# Model weights by timeframe
 MODEL_WEIGHTS = {
     '5m': {
         'CATBOOST': 0.55,  # CatBoost slightly favored
@@ -54,11 +50,7 @@ QUALITY_WEIGHTS = {
     'btc_correlation': 5        # Independent or following BTC
 }
 
-# ============================================================================
-# CRITICAL FIX: Signal thresholds for price change (in DECIMAL form)
-# OLD: Used quality scores (80, 65, etc.) - WRONG!
-# NEW: Use actual price change thresholds calibrated for crypto
-# ============================================================================
+# Signal thresholds for price change predictions
 SIGNAL_THRESHOLDS = {
     '5m': {
         'strong_buy': 0.0004,   # 0.04% for 5m
@@ -109,9 +101,7 @@ POSITION_SIZING = {
     'quality_below_60': (1, 2)
 }
 
-# ============================================================================
-# FIBONACCI & LEVERAGE CONFIGURATION - NEW
-# ============================================================================
+# Fibonacci and leverage configuration
 
 # Fibonacci levels for technical analysis
 FIBONACCI_LEVELS = {
@@ -178,9 +168,7 @@ RISK_MANAGEMENT = {
     }
 }
 
-# ============================================================================
-# END OF FIBONACCI & LEVERAGE CONFIGURATION
-# ============================================================================
+
 
 # Available symbols and timeframes
 SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
@@ -210,19 +198,3 @@ LOGGING_CONFIG = {
     'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     'file': 'logs/crypto_agent.log'
 }
-
-# ============================================================================
-# CONFIGURATION SUMMARY:
-# ============================================================================
-# 1. MODEL_WEIGHTS: Only catboost + xgboost (matches your actual models)
-# 2. SIGNAL_THRESHOLDS: Price change decimals (not quality scores)
-# 3. FIBONACCI_LEVELS: Golden ratio levels for TP calculation
-# 4. TP_DISTRIBUTION: How to split position across 3 take profit levels
-# 5. LEVERAGE_CONFIG: Dynamic 1-20x leverage based on confidence + quality
-# 6. RISK_MANAGEMENT: Stop loss %, Fibonacci multipliers, R:R ratios
-#
-# ✅ Supports 1x-20x leverage with intelligent scaling
-# ✅ Three Fibonacci-based take profit levels (0.382, 0.618, 1.0)
-# ✅ Position split: 30% at TP1, 40% at TP2, 30% at TP3
-# ✅ Dynamic stop loss based on timeframe and quality
-# ============================================================================

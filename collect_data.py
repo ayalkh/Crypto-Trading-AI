@@ -1,19 +1,15 @@
 """
-Comprehensive ML-Optimized Data Collector V2
-Updated based on ML training analysis and Priority 1 fixes
+Comprehensive ML-Optimized Data Collector
 
-Key Improvements:
-- Aligned with prediction lookback requirements (6 months for 1d)
-- Optimized timeframe configurations
-- Better data quality validation
-- ML readiness assessment based on actual needs
+Collects historical cryptocurrency data optimized for machine learning models.
 
 Features:
-- 3-6 months historical data collection
+- Multi-month historical data collection
 - Technical indicators pre-calculation
 - Feature engineering and storage
 - Multi-timeframe synchronization
 - Data quality validation
+- ML readiness assessment
 """
 from datetime import datetime, timedelta
 import logging
@@ -41,7 +37,6 @@ logging.basicConfig(
 class ComprehensiveMLDataCollector:
     """
     Collect comprehensive historical data optimized for ML models
-    V2 - Updated based on ML analysis results
     """
     
     def __init__(self, db_path='data/ml_crypto_data.db'):
@@ -58,8 +53,7 @@ class ComprehensiveMLDataCollector:
             'DOT/USDT'
         ]
         
-        # Optimized timeframe configuration based on ML analysis
-        # Updated to ensure sufficient data for both training AND predictions
+        # Timeframe configuration for data collection
         self.timeframes = {
             # Format: 'timeframe': {training_months, prediction_months, expected_samples, min_required}
             '5m':  {
@@ -68,7 +62,7 @@ class ComprehensiveMLDataCollector:
                 'ml_samples': 8640,        # Expected training samples
                 'min_for_training': 1000,  # Minimum needed to train
                 'min_for_prediction': 100, # Minimum needed to predict
-                'priority': 'LOW'          # Analysis shows 5m is too noisy
+                'priority': 'LOW'
             },
             '15m': {
                 'training_months': 2,
@@ -80,27 +74,27 @@ class ComprehensiveMLDataCollector:
             },
             '1h':  {
                 'training_months': 6,
-                'prediction_months': 2,    # PRIORITY 1 FIX: increased from 1
+                'prediction_months': 2,
                 'ml_samples': 4320,
                 'min_for_training': 2000,
                 'min_for_prediction': 150,
-                'priority': 'HIGH'         # Best timeframe per analysis
+                'priority': 'HIGH'
             },
             '4h':  {
                 'training_months': 12,
-                'prediction_months': 3,    # PRIORITY 1 FIX: increased from 1
+                'prediction_months': 3,
                 'ml_samples': 2190,
                 'min_for_training': 1000,
                 'min_for_prediction': 150,
-                'priority': 'HIGH'         # Strong signals with GRU
+                'priority': 'HIGH'
             },
             '1d':  {
                 'training_months': 24,
-                'prediction_months': 6,    # PRIORITY 1 FIX: CRITICAL - was 1, now 6!
+                'prediction_months': 6,
                 'ml_samples': 730,
                 'min_for_training': 500,
-                'min_for_prediction': 180, # 6 months minimum for predictions
-                'priority': 'MEDIUM'       # Good signals but needs more data
+                'min_for_prediction': 180,
+                'priority': 'MEDIUM'
             }
         }
         
@@ -110,9 +104,8 @@ class ComprehensiveMLDataCollector:
         # Initialize enhanced database
         self.init_enhanced_database()
         
-        logging.info("🧠 Comprehensive ML Data Collector V2 initialized")
+        logging.info("🧠 Comprehensive ML Data Collector initialized")
         logging.info(f"📊 Target: {sum(config['ml_samples'] for config in self.timeframes.values())} total candles per symbol")
-        logging.info("✨ Updated with Priority 1 ML fixes")
     
     def init_enhanced_database(self):
         """Initialize database with enhanced ML schema"""
@@ -421,16 +414,10 @@ class ComprehensiveMLDataCollector:
     def collect_all_comprehensive_data(self):
         """
         Main method to collect all comprehensive data for ML
-        Now uses TRAINING months for collection
         """
         start_time = datetime.now()
         
-        logging.info("🚀 STARTING COMPREHENSIVE DATA COLLECTION FOR ML V2")
-        logging.info("=" * 70)
-        logging.info("✨ Priority 1 optimizations applied:")
-        logging.info("   • 1h prediction: 2 months lookback")
-        logging.info("   • 4h prediction: 3 months lookback")
-        logging.info("   • 1d prediction: 6 months lookback (CRITICAL FIX)")
+        logging.info("🚀 STARTING COMPREHENSIVE DATA COLLECTION FOR ML")
         logging.info("=" * 70)
         
         total_symbols = len(self.symbols)
@@ -583,8 +570,8 @@ class ComprehensiveMLDataCollector:
             logging.error(f"❌ Status display error: {e}")
     
     def _assess_ml_readiness(self, status_df: pd.DataFrame):
-        """Assess if data is ready for ML models with Priority 1 requirements"""
-        logging.info("\n🧠 ML READINESS ASSESSMENT (Priority 1 Standards)")
+        """Assess if data is ready for ML models"""
+        logging.info("\n🧠 ML READINESS ASSESSMENT")
         logging.info("="*70)
         
         training_ready = []
@@ -619,10 +606,9 @@ class ComprehensiveMLDataCollector:
             logging.info("✅ ALL DATA IS READY FOR ML!")
             logging.info("   • All symbols can be trained")
             logging.info("   • All symbols can make predictions")
-            logging.info("   • Daily predictions have 6+ months data ✨")
             logging.info("\n🎯 Recommended Next Steps:")
-            logging.info("   1. Train models with optimized_ml_system_enhanced.py")
-            logging.info("   2. Focus on 1h and 4h timeframes (best performers)")
+            logging.info("   1. Train models")
+            logging.info("   2. Focus on 1h and 4h timeframes")
             logging.info("   3. Prioritize DOT and ETH (highest accuracy)")
         elif len(training_ready) == total:
             logging.info("✅ TRAINING DATA READY!")
@@ -643,18 +629,18 @@ class ComprehensiveMLDataCollector:
             if len(issues) > 10:
                 logging.info(f"   ... and {len(issues)-10} more issues")
         
-        # Priority recommendations
-        logging.info("\n📋 PRIORITY TIMEFRAMES (based on analysis):")
-        logging.info("   ⭐ HIGH:   1h, 4h (best accuracy, stable predictions)")
-        logging.info("   🔵 MEDIUM: 15m, 1d (decent signals, needs careful use)")
-        logging.info("   ⚪ LOW:    5m (too noisy, consider removing)")
+        # Timeframe recommendations
+        logging.info("\n📋 TIMEFRAME PRIORITIES:")
+        logging.info("   ⭐ HIGH:   1h, 4h")
+        logging.info("   🔵 MEDIUM: 15m, 1d")
+        logging.info("   ⚪ LOW:    5m")
 
 
 def main():
     """Main execution function"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Comprehensive ML Data Collector V2')
+    parser = argparse.ArgumentParser(description='Comprehensive ML Data Collector')
     parser.add_argument('--status', action='store_true', help='Show database status only')
     parser.add_argument('--symbols', nargs='+', help='Specific symbols to collect (default: all)')
     parser.add_argument('--timeframes', nargs='+', help='Specific timeframes (default: all)')
@@ -685,7 +671,7 @@ def main():
                 tf: config for tf, config in collector.timeframes.items()
                 if config['priority'] == 'HIGH'
             }
-            logging.info("🎯 HIGH PRIORITY ONLY MODE: Collecting 1h and 4h only")
+            logging.info("🎯 HIGH PRIORITY MODE: Collecting 1h and 4h only")
         
         # Run collection
         collector.collect_all_comprehensive_data()

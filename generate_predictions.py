@@ -1,10 +1,7 @@
 """
-Generate ML Predictions and Save to Database - FIXED VERSION v3
-============================================================
-CRITICAL FIXES:
-1. Corrected threshold values to match actual model predictions
-2. Fixed inconsistency between ensemble and individual model units
-3. Added comprehensive diagnostic logging
+Generate ML Predictions and Save to Database
+============================================
+Generates predictions using trained ML models and saves them to the database.
 
 Based on actual crypto market behavior:
 - 5m:  0.01-0.05% typical moves
@@ -20,7 +17,7 @@ import logging
 import traceback
 
 # Import your existing system
-from optimized_ml_system_v2 import OptimizedMLSystemV2 as OptimizedCryptoMLSystem
+from train_models import OptimizedMLSystemV2 as OptimizedCryptoMLSystem
 
 # Setup detailed logging
 logging.basicConfig(
@@ -37,11 +34,7 @@ logger = logging.getLogger(__name__)
 SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'DOT/USDT']
 TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
 
-# ============================================================================
-# DATA-DRIVEN THRESHOLDS - From diagnose_thresholds.py analysis
-# Based on 50th percentile of YOUR actual model predictions
-# Target: 40-60% directional signals (UP/DOWN), 40-60% NEUTRAL
-# ============================================================================
+# Direction classification thresholds by timeframe
 DIRECTION_THRESHOLDS = {
     '5m': 0.000016,   # 0.0016% - 50th percentile
     '15m': 0.000021,  # 0.0021% - 50th percentile
@@ -142,9 +135,7 @@ def create_predictions_table(db_path='data/ml_crypto_data.db'):
 
 def save_prediction(db_path, symbol, timeframe, prediction):
     """
-    Save individual model predictions to database with FIXED classification
-    
-    CRITICAL FIX: Handle both decimal and percentage formats correctly
+    Save individual model predictions to database
     """
     
     try:
@@ -162,10 +153,9 @@ def save_prediction(db_path, symbol, timeframe, prediction):
             # Fallback: save ensemble prediction
             predicted_price = prediction.get('predicted_price')
             
-            # FIX: ensemble stores price_change_pct as PERCENTAGE (already ×100)
-            # So we need to divide by 100 to get decimal for classification
+            # Ensemble stores price_change_pct as percentage, convert to decimal
             price_change_pct_percentage = prediction.get('price_change_pct', 0)
-            price_change_pct = price_change_pct_percentage / 100.0  # Convert to decimal
+            price_change_pct = price_change_pct_percentage / 100.0
             
             logger.info(f"   📊 Ensemble: {price_change_pct_percentage:+.4f}% (decimal: {price_change_pct:+.6f})")
             
@@ -205,13 +195,12 @@ def save_prediction(db_path, symbol, timeframe, prediction):
             # Extract values
             predicted_price = model_pred.get('predicted_price')
             
-            # FIX: individual models store price_change_pct as DECIMAL (not ×100)
-            # No conversion needed!
+            # Individual models store price_change_pct as decimal
             price_change_pct = model_pred.get('price_change_pct', 0)
             
             logger.info(f"   📊 {model_name.upper():9}: raw prediction = {price_change_pct:+.6f} ({price_change_pct*100:+.4f}%)")
             
-            # REALISTIC classification with timeframe-specific thresholds
+            # Classification with timeframe-specific thresholds
             direction, direction_prob = classify_direction(price_change_pct, timeframe)
             direction_distribution[direction] += 1
             
@@ -362,12 +351,10 @@ def main():
     """Generate and save predictions for all symbols"""
     
     print("\n" + "="*70)
-    print("🔮 GENERATE ML PREDICTIONS - FIXED VERSION v3")
+    print("🔮 GENERATE ML PREDICTIONS")
     print("="*70)
-    print("\n🔧 Key Improvements:")
-    print("  • Fixed threshold values for crypto market reality")
-    print("  • Fixed inconsistency between ensemble and individual units")
-    print("  • Added comprehensive diagnostic logging")
+    print("\n📊 Configuration:")
+    print("  • Timeframe-specific thresholds for crypto markets")
     print("  • Target: 40-60% directional signals, 40-60% NEUTRAL")
     print("\n📊 Current Thresholds:")
     for tf, thresh in DIRECTION_THRESHOLDS.items():
@@ -391,7 +378,7 @@ def main():
         return False
     
     # Step 3: Generate and save predictions
-    logger.info("\nSTEP 3: Generating predictions with FIXED classification...")
+    logger.info("\nSTEP 3: Generating predictions...")
     logger.info("="*70)
     
     total_attempted = 0
@@ -467,12 +454,10 @@ def main():
     print("="*70)
     
     if total_saved > 0:
-        print("\n✅ SUCCESS! Predictions saved with FIXED classification")
+        print("\n✅ SUCCESS! Predictions saved")
         print("\n💡 Next steps:")
-        print("   1. Run: python test_agent_quick.py")
-        print("   2. You should see 40-60% UP/DOWN signals, 40-60% NEUTRAL")
-        print("   3. Agent should find tradeable opportunities")
-        print("\n🎯 Thresholds are tuned for realistic crypto market moves!")
+        print("   1. Run the trading agent to analyze opportunities")
+        print("   2. Check predictions in the database")
         return True
     else:
         print("\n❌ FAILED! No predictions were saved")
