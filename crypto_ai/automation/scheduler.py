@@ -78,34 +78,93 @@ class CryptoAutomationScheduler:
         except Exception as e:
             logger.error(f"Error in signal analysis job: {e}")
 
+    def run_prediction_generation(self):
+        logger.info("Starting prediction generation job...")
+        try:
+            cmd = [sys.executable, 'generate_predictions.py']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                logger.info("Prediction generation completed successfully")
+            else:
+                logger.error(f"Prediction generation failed: {result.stderr}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error in prediction generation job: {e}")
+            return False
+
+    def run_model_training(self):
+        logger.info("Starting daily model training...")
+        try:
+            # Run with --auto-run to avoid interactive prompts
+            cmd = [sys.executable, 'train_models.py', '--auto-run']
+            
+            # This can take a while, so we increase timeout or just let it run
+            # Using Popen to not block if we wanted, but run() is fine for a background thread
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                logger.info("Model training completed successfully")
+            else:
+                logger.error(f"Model training failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error in model training job: {e}")
+
+    def run_trading_pipeline(self):
+        """
+        Runs the full trading pipeline:
+        1. Collect Data
+        2. Generate Predictions
+        3. Analyze Signals (Agent)
+        """
+        logger.info("🚀 Starting Trading Pipeline...")
+        
+        # 1. Collect Data
+        self.run_data_collection()
+        
+        # 2. Generate Predictions
+        if not self.run_prediction_generation():
+            logger.error("Skipping analysis due to prediction failure")
+            return
+
+        # 3. Analyze Signals / Run Agent
+        # We run analyze_signals.py which handles the analysis part
+        self.run_signal_analysis()
+        
+        # Optional: Run run_agent.py for CLI output logging
+        # self.run_agent_reporting() 
+        
+        logger.info("✅ Trading Pipeline completed")
+
     def start(self):
         logger.info("Initializing Crypto Automation Scheduler...")
         
-        # Data Collection
-        if self.config.get('data_collection', {}).get('enabled', True):
-            interval_mins = self.config.get('data_collection', {}).get('interval_minutes', 60)
-            self.scheduler.add_job(
-                self.run_data_collection,
-                IntervalTrigger(minutes=interval_mins),
-                id='data_collection',
-                name='Data Collection',
-                replace_existing=True,
-                next_run_time=datetime.now() # Run immediately on start
-            )
-            logger.info(f"Scheduled Data Collection every {interval_mins} minutes")
-
-        # Signal Analysis
+        # 1. Main Trading Pipeline (Data -> Predict -> Analyze)
+        # Driven by the faster interval (usually signal analysis)
         if self.config.get('signal_analysis', {}).get('enabled', True):
             interval_mins = self.config.get('signal_analysis', {}).get('interval_minutes', 15)
+            
             self.scheduler.add_job(
-                self.run_signal_analysis,
+                self.run_trading_pipeline,
                 IntervalTrigger(minutes=interval_mins),
-                id='signal_analysis',
-                name='Signal Analysis',
+                id='trading_pipeline',
+                name='Trading Pipeline (Collect->Predict->Analyze)',
                 replace_existing=True,
                 next_run_time=datetime.now() # Run immediately on start
             )
-            logger.info(f"Scheduled Signal Analysis every {interval_mins} minutes")
+            logger.info(f"Scheduled Trading Pipeline every {interval_mins} minutes")
+            
+        # 2. Daily Model Training (Retraining)
+        # Schedule for 04:00 AM daily
+        self.scheduler.add_job(
+            self.run_model_training,
+            CronTrigger(hour=4, minute=0),
+            id='model_training',
+            name='Daily Model Training',
+            replace_existing=True
+        )
+        logger.info("Scheduled Daily Model Training at 04:00 AM")
 
         self.scheduler.start()
         logger.info("Scheduler started. Press Ctrl+C to exit.")
