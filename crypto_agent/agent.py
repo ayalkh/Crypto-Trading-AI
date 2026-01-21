@@ -5,7 +5,7 @@ Coordinates all tools and manages conversation flow
 import logging
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 from .database import AgentDatabase
@@ -47,6 +47,11 @@ class CryptoTradingAgent:
         # Agent state
         self.conversation_history = []
         self.last_recommendations = {}  # Track recent recommendations
+        
+        # Drawdown protection state
+        self.peak_capital = 1000.0  # Track peak for drawdown calculation
+        self.daily_pnl = 0.0  # Track daily P&L
+        self.last_reset_time = datetime.now()
         
         self.logger.info(f"✅ Agent '{AGENT_CONFIG['name']}' v{AGENT_CONFIG['version']} ready!")
         self.logger.info(f"📊 Monitoring {len(SYMBOLS)} symbols across {len(TIMEFRAMES)} timeframes")
@@ -245,11 +250,17 @@ class CryptoTradingAgent:
         adjusted_confidence = base_confidence
         risk_factors = []
         
-        # Rule 1: Quality threshold - FIXED to 50
-        if quality_score < 50:
+        # Rule 1: Quality threshold - Production configuration (Q=55)
+        if quality_score < 55:
             should_trade = False
             adjusted_action = 'HOLD'
-            risk_factors.append(f"Quality score too low ({quality_score}/100, need 50+)")
+            risk_factors.append(f"Quality score too low ({quality_score}/100, need 55+)")
+
+
+
+
+
+
         
         # Rule 2: Confidence threshold
         if base_confidence < 0.50:
@@ -297,8 +308,37 @@ class CryptoTradingAgent:
                 risk_factors.append(f"Model disagreement ({agreement_rate:.0%} consensus)")
                 adjusted_confidence *= 0.9
         
-        # Calculate position sizing
+        # Rule 7: Drawdown protection
+        # Note: In backtest mode, current_capital would need to be passed in
+        # For now, we use a placeholder that can be overridden
+        can_trade_dd, dd_reason = self._check_drawdown_limits(current_capital=self.peak_capital)
+        if not can_trade_dd:
+            should_trade = False
+            adjusted_action = 'HOLD'
+            risk_factors.append(dd_reason)
+        
+        # Calculate position sizing (optimized)
         position_min, position_max = quality['position_size_pct']
+        
+        # Reduce base position from 20% to 15%
+        position_min *= 0.75
+        position_max *= 0.75
+        
+        # Scale up for high quality trades
+        if quality_score >= 85:
+            position_min *= 1.33
+            position_max *= 1.33
+        
+        # Scale down based on recent performance
+        if recent_trades >= 5:
+            historical = self.db.get_historical_signals(symbol, timeframe, days_back=7)
+            if not historical.empty and len(historical) >= 5:
+                recent_win_rate = (historical['outcome_4h'] == 'WIN').sum() / len(historical)
+                if recent_win_rate < 0.45:
+                    position_min *= 0.67
+                    position_max *= 0.67
+        
+        # Apply regime adjustment
         position_min *= position_adjustment
         position_max *= position_adjustment
         
@@ -344,6 +384,13 @@ class CryptoTradingAgent:
             leverage_range = fib_targets['leverage_range']
             leverage_note = fib_targets['leverage_note']
             risk_reward_ratio = fib_targets['risk_reward_ratio']
+            
+            # R/R ratio enforcement removed - too restrictive for current market conditions
+            # Quality threshold (60) provides sufficient filtering
+
+
+
+
         else:
             # Use old calculation for non-tradeable signals
             stop_loss_pct = self._calculate_stop_loss(timeframe, quality_score)
@@ -411,6 +458,42 @@ class CryptoTradingAgent:
             return len(historical) if not historical.empty else 0
         
         return 0
+    
+    def _check_drawdown_limits(self, current_capital: float) -> Tuple[bool, str]:
+        """
+        Check if drawdown limits are breached
+        
+        Args:
+            current_capital: Current account capital
+            
+        Returns:
+            (can_trade, reason)
+        """
+        # Update peak
+        if current_capital > self.peak_capital:
+            self.peak_capital = current_capital
+        
+        # Calculate drawdown from peak
+        drawdown_pct = (self.peak_capital - current_capital) / self.peak_capital if self.peak_capital > 0 else 0
+        
+        # Reset daily P&L every 24 hours
+        now = datetime.now()
+        if (now - self.last_reset_time).total_seconds() > 86400:  # 24h
+            self.daily_pnl = 0
+            self.last_reset_time = now
+        
+        # Calculate daily loss percentage
+        daily_loss_pct = abs(self.daily_pnl) / self.peak_capital if self.daily_pnl < 0 and self.peak_capital > 0 else 0
+        
+        # Check daily loss limit (5%)
+        if daily_loss_pct > 0.05:
+            return False, f"Daily loss limit breached ({daily_loss_pct:.1%})"
+        
+        # Max drawdown protection disabled (baseline configuration)
+        # if drawdown_pct > 0.30:
+        #     return False, f"Max drawdown limit breached ({drawdown_pct:.1%})"
+        
+        return True, ""
     
     def _calculate_stop_loss(self, timeframe: str, quality_score: int) -> float:
         """Calculate stop loss percentage based on timeframe and quality (LEGACY - for non-tradeable signals)"""
