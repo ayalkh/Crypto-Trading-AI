@@ -93,51 +93,40 @@ Crypto-Trading-AI/
 │   ├── train_models.py          # ML model training (CatBoost + XGBoost)
 │   ├── generate_predictions.py  # Generate predictions from trained models
 │   ├── analyze_signals.py       # Technical analysis + signal generation
-│   ├── run_agent.py            # Run the autonomous trading agent
-│   └── control_center.py       # Unified control interface (CLI)
+│   ├── run_agent.py             # Run the autonomous trading agent
+│   └── control_center.py        # Unified control interface (CLI)
 │
 ├── 🤖 Agent Logic
 │   └── crypto_agent/
-│       ├── agent.py            # Main agent orchestration
-│       ├── tools.py            # Agent tools (analysis, predictions, etc.)
-│       ├── database.py         # Database operations
-│       ├── config.py           # Agent configuration
-│       └── prompts.py          # LLM prompts (if using AI reasoning)
+│       ├── agent.py             # Main agent orchestration
+│       ├── tools.py             # Agent tools (analysis, predictions, etc.)
+│       ├── database.py          # Database operations
+│       ├── config.py            # Agent configuration
+│       └── prompts.py           # LLM prompts
 │
 ├── 🧠 ML & Analysis
 │   └── crypto_ai/
-│       ├── features/           # Feature engineering
-│       ├── database/           # Database schemas
-│       ├── automation/         # Scheduling & automation
-│       └── gpu_utils.py        # GPU acceleration utilities
+│       ├── features/            # Feature engineering
+│       ├── database/            # Database schemas
+│       ├── automation/          # Scheduling & automation
+│       └── gpu_utils.py         # GPU acceleration utilities
 │
 ├── 📊 Data & Models
 │   ├── data/
-│   │   ├── ml_crypto_data.db           # Main database (market data, predictions)
-│   │   └── backtest_baseline_final.db  # Backtest results
-│   ├── ml_models/              # Trained model files (.pkl)
-│   └── ml_predictions/         # Prediction outputs
+│   │   └── ml_crypto_data.db    # Main database
+│   ├── ml_models/               # Trained model files (.pkl)
+│   └── ml_predictions/          # Prediction outputs
 │
-├── 📝 Reports & Logs
-│   ├── ml_reports/             # Validation reports, benchmarks
-│   └── logs/                   # Application logs
-│
-├── 🧪 Testing & Validation
-│   ├── tests/                  # Unit tests
-│   ├── presentation_validation_tests.py  # Comprehensive validation
-│   ├── profitability_analysis.py        # Profitability analysis
-│   └── agent_vs_random_backtest.py      # Agent vs random baseline
+├── 📝 Logs
+│   └── logs/                    # Application logs
 │
 ├── ⚙️  Configuration
-│   ├── .env                    # Environment variables (API keys, etc.)
-│   ├── automation_config.json  # Main configuration
-│   └── automation_config_ml.json  # ML-specific settings
+│   ├── .env                     # Environment variables
+│   ├── automation_config.json   # Main configuration
+│   └── automation_config_ml.json # ML-specific settings
 │
 └── 📚 Documentation
-    ├── README.md               # This file
-    ├── FILE_RENAMING.md        # File renaming history
-    ├── project_report.md       # Project status report
-    └── ml_reports/final_presentation_summary.md  # Latest validation results
+    └── README.md                # This file
 ```
 
 ---
@@ -275,31 +264,6 @@ for signal in signals:
 
 ---
 
-## 🧪 Testing & Validation
-
-### Run Comprehensive Validation
-```bash
-python presentation_validation_tests.py
-```
-
-This runs:
-- ✅ Feature selection benchmark
-- ✅ Model training validation
-- ✅ Agent execution test
-- ✅ Quality filtering verification
-
-### Run Profitability Analysis
-```bash
-python profitability_analysis.py
-```
-
-### Run Agent vs Random Baseline
-```bash
-python agent_vs_random_backtest.py
-```
-
----
-
 ## 🛠️ Development
 
 ### File Naming Convention (Updated Jan 21, 2026)
@@ -315,8 +279,6 @@ Old files were renamed for clarity:
 | `run_agent_FINAL.py` | `run_agent.py` | Agent execution |
 | `crypto_control_center.py` | `control_center.py` | Control center |
 
-See [FILE_RENAMING.md](FILE_RENAMING.md) for details.
-
 ### Database Schema
 
 **ml_crypto_data.db** contains:
@@ -330,13 +292,10 @@ See [FILE_RENAMING.md](FILE_RENAMING.md) for details.
 ---
 
 ## 📚 Documentation
-
-- **[FILE_RENAMING.md](FILE_RENAMING.md)** - File renaming history
-- **[project_report.md](project_report.md)** - Project status report
-- **[ml_reports/final_presentation_summary.md](ml_reports/final_presentation_summary.md)** - Latest validation results
-- **Code docstrings** - Inline documentation
-
----
+ 
+- **Code docstrings** - Inline documentation within the Python files
+ 
+ ---
 
 ## 🔐 Security Best Practices
 
